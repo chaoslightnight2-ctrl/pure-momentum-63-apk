@@ -8,9 +8,9 @@ on:
         required: false
         default: "false"
   schedule:
-    # About every 3 hours around the US session. The bot still checks Alpaca
+    # Every 3 hours all day. The bot still checks Alpaca
     # market-open status and the 5-trading-day rebalance gate before orders.
-    - cron: "17 13,16,19,22 * * 1-5"
+    - cron: "17 */3 * * *"
 
 permissions:
   contents: write

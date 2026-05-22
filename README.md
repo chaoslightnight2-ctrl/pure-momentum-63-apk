@@ -36,9 +36,9 @@ This repo does not enable live trading.
 
 ## GitHub Actions Schedule
 
-`.github/workflows/pure-momentum-paper.yml` runs the paper order runner about every 3 hours:
+`.github/workflows/pure-momentum-paper.yml` runs the paper order runner every 3 hours all day:
 
-- UTC cron: `17 13,16,19,22 * * 1-5`
+- UTC cron: `17 */3 * * *`
 
 The workflow still checks Alpaca market-open status, existing open orders, buying power, and the 5-trading-day rebalance gate before sending paper orders. If the market is closed or rebalance is not due, it exits without orders.
 
