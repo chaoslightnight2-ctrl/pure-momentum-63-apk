@@ -42,6 +42,8 @@ This repo does not enable live trading.
 
 The workflow still checks Alpaca market-open status, existing open orders, buying power, and the 5-trading-day rebalance gate before sending paper orders. If the market is closed or rebalance is not due, it exits without orders.
 
+Rebalance state is kept in `state/pure_momentum_state.json`. After a successful paper rebalance run, GitHub Actions commits the latest rebalance date back to the repository so later 3-hour runs do not repeat the same rebalance.
+
 Required GitHub secrets:
 
 - `ALPACA_API_KEY`

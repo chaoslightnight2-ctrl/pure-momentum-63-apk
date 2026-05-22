@@ -24,6 +24,7 @@ from src.utils.io_utils import ensure_dir, load_yaml_config, write_json
 DAILY_BUY_BLOCK_LOSS_PCT = 0.02
 MIN_DELTA_NOTIONAL = 25.0
 MANAGED_ORDER_PREFIX = "gh-puremom"
+DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
 
 
 @dataclass
@@ -82,12 +83,42 @@ def selected_symbols(close: pd.DataFrame, lookback_days: int, top_n: int, min_mo
     return [str(symbol) for symbol in momentum.head(top_n).index]
 
 
-def is_rebalance_day(close: pd.DataFrame, backtest_start: str, rebalance_days: int) -> bool:
-    start = pd.Timestamp(backtest_start).tz_localize(None)
-    trading_days = close.index[close.index >= start]
-    if len(trading_days) == 0:
-        return False
-    return (len(trading_days) - 1) % max(rebalance_days, 1) == 0
+def load_state(path: str | Path) -> dict[str, Any]:
+    state_path = ROOT / path
+    if not state_path.exists():
+        return {}
+    return json.loads(state_path.read_text(encoding="utf-8"))
+
+
+def save_state(path: str | Path, state: dict[str, Any]) -> None:
+    state_path = ROOT / path
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def trading_days_since(close: pd.DataFrame, last_rebalance_date: str | None) -> int | None:
+    if not last_rebalance_date:
+        return None
+    last = pd.Timestamp(last_rebalance_date).tz_localize(None).normalize()
+    completed = close.index.normalize()
+    return int((completed > last).sum())
+
+
+def is_rebalance_due(
+    close: pd.DataFrame,
+    state: dict[str, Any],
+    rebalance_days: int,
+    has_managed_position: bool,
+) -> tuple[bool, str, int | None]:
+    last_rebalance_date = state.get("last_rebalance_date")
+    days_since = trading_days_since(close, last_rebalance_date)
+    if not has_managed_position:
+        return True, "no_managed_position", days_since
+    if days_since is None:
+        return True, "no_rebalance_state", days_since
+    if days_since >= max(rebalance_days, 1):
+        return True, "rebalance_interval_due", days_since
+    return False, "rebalance_interval_wait", days_since
 
 
 def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> dict[str, int]:
@@ -183,6 +214,7 @@ def submit_plans(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/settings.yaml")
+    parser.add_argument("--state-path", default=DEFAULT_STATE_PATH)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--force-rebalance", action="store_true")
     args = parser.parse_args()
@@ -198,7 +230,7 @@ def main() -> None:
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     min_momentum_raw = strategy_cfg.get("min_momentum")
     min_momentum = None if min_momentum_raw is None else float(min_momentum_raw)
-    backtest_start = str(strategy_cfg.get("backtest_start", "2023-04-25"))
+    state = load_state(args.state_path)
 
     client = AlpacaPaperTradingClient.from_env()
     account = client.get_account()
@@ -216,7 +248,10 @@ def main() -> None:
     chosen = selected_symbols(close, lookback_days, top_n, min_momentum)
     positions = client.get_positions()
     current_qty = managed_positions(positions, universe)
-    due = args.force_rebalance or not current_qty or is_rebalance_day(close, backtest_start, rebalance_days)
+    due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
+    due = args.force_rebalance or due
+    if args.force_rebalance:
+        due_reason = "forced"
     open_orders = client.get_orders(status="open", nested=True)
 
     if has_blocking_open_order(open_orders, universe):
@@ -224,6 +259,9 @@ def main() -> None:
             "status": "blocked_open_order",
             "message": "Open managed-symbol order exists; duplicate paper orders blocked.",
             "selected_symbols": chosen,
+            "last_rebalance_date": state.get("last_rebalance_date"),
+            "trading_days_since_rebalance": trading_days_elapsed,
+            "rebalance_due_reason": due_reason,
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -235,6 +273,9 @@ def main() -> None:
             "message": "Pure Momentum 63 rebalance is not due today.",
             "selected_symbols": chosen,
             "current_qty": current_qty,
+            "last_rebalance_date": state.get("last_rebalance_date"),
+            "trading_days_since_rebalance": trading_days_elapsed,
+            "rebalance_due_reason": due_reason,
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -252,6 +293,21 @@ def main() -> None:
 
     run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
     submitted = submit_plans(client, plans, args.execute, run_key)
+    completed_signal_date = str(close.index[-1].date())
+    state_updated = False
+    if args.execute:
+        state.update(
+            {
+                "last_rebalance_date": completed_signal_date,
+                "last_rebalance_at_utc": datetime.now(timezone.utc).isoformat(),
+                "last_selected_symbols": chosen,
+                "last_order_count": len(submitted),
+                "last_rebalance_reason": due_reason,
+                "strategy": "pure_momentum_lb63_top3_reb5",
+            }
+        )
+        save_state(args.state_path, state)
+        state_updated = True
     report = {
         "status": "submitted" if args.execute else "dry_run",
         "execute": bool(args.execute),
@@ -261,6 +317,10 @@ def main() -> None:
         "target_gross_leverage": target_gross,
         "max_gross_leverage": max_gross,
         "rebalance_due": due,
+        "rebalance_due_reason": due_reason,
+        "last_rebalance_date": state.get("last_rebalance_date"),
+        "trading_days_since_rebalance": trading_days_elapsed,
+        "state_updated": state_updated,
         "buying_power": buying_power,
         "equity": equity,
         "orders": submitted,

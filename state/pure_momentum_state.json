@@ -1,0 +1,8 @@
+{
+  "last_order_count": 0,
+  "last_rebalance_at_utc": null,
+  "last_rebalance_date": null,
+  "last_rebalance_reason": "initial_state",
+  "last_selected_symbols": [],
+  "strategy": "pure_momentum_lb63_top3_reb5"
+}
