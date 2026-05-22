@@ -1,0 +1,190 @@
+costs:
+  slippage_bps: 8
+  fallback_spread_bps: 10
+
+risk:
+  initial_capital: 100000
+
+reports:
+  directory: reports
+
+pure_momentum:
+  backtest_start: "2023-04-25"
+  lookback_days: 63
+  top_n: 3
+  rebalance_days: 5
+  target_gross_leverage: 2.0
+  max_gross_leverage: 2.0
+  min_momentum:
+  cost_per_turnover: 0.0005
+  universe:
+    - TQQQ
+    - TECL
+    - SOXL
+    - UPRO
+    - SPXL
+    - MSTR
+    - COIN
+    - MARA
+    - RIOT
+    - NVDA
+    - AMD
+    - PLTR
+    - SMCI
+    - TSLA
+    - CVNA
+    - APP
+    - HOOD
+
+catalyst_momentum_search:
+  earnings_cache: reports/earnings_cache_yfinance.json
+  best_report: reports/catalyst_focused_report.json
+  best_equity_curve: reports/catalyst_focused_best_equity.csv
+  best_candidate:
+    name: catalyst_lb63_top3_eb1.5_gb1.0
+    lookback_days: 63
+    top_n: 3
+    rebalance_days: 5
+    target_gross_leverage: 2.0
+    earnings_surprise_boost: 1.5
+    earnings_surprise_window_days: 25
+    gap_reaction_boost: 1.0
+    gap_reaction_window_days: 5
+    gap_reaction_threshold: 0.08
+
+composite_regime_momentum:
+  profile: alpaca_2x_cap
+  backtest_start: "2019-01-01"
+  portfolio_leverage: 1.0
+  gross_exposure_cap: 1.9
+  volatility_days: 20
+  annualization_days: 252
+  max_component_leverage: 4.0
+  cooldown_days_after_stop: 0
+  min_stop_distance_pct: 0.0
+  live_execution:
+    same_day_stop_buy_cooldown: false
+    min_protective_stop_distance_pct: 0.015
+  paper_enabled: true
+  risk_overlay:
+    enabled: false
+    volatility_window: 20
+    target_volatility: 0.85
+    max_scale: 2.0
+    min_scale: 0.6
+    drawdown_ma_days: 0
+    drawdown_scale: 1.0
+    annualization_days: 252
+  components:
+    - name: AVGO_momentum
+      symbol: AVGO
+      weight: 0.2855
+      trend_ma_days: 300
+      momentum_days: 180
+      target_volatility: 0.95
+      stop_loss_pct: 0.025
+    - name: TSLA_slow
+      symbol: TSLA
+      weight: 0.2163
+      trend_ma_days: 150
+      momentum_days: 120
+      target_volatility: 0.95
+      stop_loss_pct: 0.02
+    - name: NVDA_fast
+      symbol: NVDA
+      weight: 0.1744
+      trend_ma_days: 200
+      momentum_days: 60
+      target_volatility: 0.80
+      stop_loss_pct: 0.025
+    - name: NVDA_slow
+      symbol: NVDA
+      weight: 0.1189
+      trend_ma_days: 250
+      momentum_days: 180
+      target_volatility: 0.80
+      stop_loss_pct: 0.025
+    - name: AVGO_fast
+      symbol: AVGO
+      weight: 0.0880
+      trend_ma_days: 250
+      momentum_days: 120
+      target_volatility: 0.95
+      stop_loss_pct: 0.025
+    - name: GLD_trend
+      symbol: GLD
+      weight: 0.1168
+      trend_ma_days: 300
+      momentum_days: 120
+      target_volatility: 0.50
+      stop_loss_pct: 0.03
+
+strategy_profiles:
+  balanced_dd25:
+    portfolio_leverage: 1.09
+    risk_overlay:
+      enabled: true
+      volatility_window: 20
+      target_volatility: 0.85
+      max_scale: 1.05
+      min_scale: 0.6
+      drawdown_ma_days: 90
+      drawdown_scale: 0.25
+      annualization_days: 252
+    components:
+      - name: GLD_trend
+        symbol: GLD
+        weight: 0.3227
+        trend_ma_days: 300
+        momentum_days: 120
+        target_volatility: 0.50
+        stop_loss_pct: 0.03
+      - name: AVGO_momentum
+        symbol: AVGO
+        weight: 0.3161
+        trend_ma_days: 300
+        momentum_days: 180
+        target_volatility: 0.95
+        stop_loss_pct: 0.025
+      - name: TSLA_fast
+        symbol: TSLA
+        weight: 0.1102
+        trend_ma_days: 150
+        momentum_days: 60
+        target_volatility: 0.95
+        stop_loss_pct: 0.02
+      - name: TSLA_slow
+        symbol: TSLA
+        weight: 0.1140
+        trend_ma_days: 150
+        momentum_days: 120
+        target_volatility: 0.95
+        stop_loss_pct: 0.02
+      - name: MSFT_defensive
+        symbol: MSFT
+        weight: 0.0709
+        trend_ma_days: 250
+        momentum_days: 90
+        target_volatility: 0.35
+        stop_loss_pct: 0.025
+      - name: SOXX_trend
+        symbol: SOXX
+        weight: 0.0172
+        trend_ma_days: 300
+        momentum_days: 0
+        target_volatility: 0.80
+        stop_loss_pct: 0.02
+      - name: SOXX_momentum
+        symbol: SOXX
+        weight: 0.0244
+        trend_ma_days: 300
+        momentum_days: 180
+        target_volatility: 0.80
+        stop_loss_pct: 0.025
+      - name: AAPL_defensive
+        symbol: AAPL
+        weight: 0.0245
+        trend_ma_days: 200
+        momentum_days: 0
+        target_volatility: 0.35
+        stop_loss_pct: 0.02

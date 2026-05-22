@@ -1,0 +1,65 @@
+name: Pure Momentum Paper Orders
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebalance:
+        description: "Force rebalance even if the 5-trading-day gate is not due"
+        required: false
+        default: "false"
+  schedule:
+    # About every 3 hours around the US session. The bot still checks Alpaca
+    # market-open status and the 5-trading-day rebalance gate before orders.
+    - cron: "17 13,16,19,22 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pure-momentum-paper-orders
+  cancel-in-progress: false
+
+jobs:
+  paper-orders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Istanbul
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile paper runner
+        run: |
+          python -m py_compile scripts/run_pure_momentum_paper.py src/trading/alpaca_paper.py src/utils/io_utils.py
+
+      - name: Run Pure Momentum paper orders
+        shell: bash
+        run: |
+          EXTRA_ARGS=""
+          if [ "${{ github.event.inputs.force_rebalance }}" = "true" ]; then
+            EXTRA_ARGS="--force-rebalance"
+          fi
+          python scripts/run_pure_momentum_paper.py --config config/settings.yaml --execute $EXTRA_ARGS
+
+      - name: Upload last run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pure-momentum-paper-run
+          path: reports/pure_momentum_paper_run.json
+          if-no-files-found: ignore
