@@ -16,7 +16,7 @@ This is research-only and paper-trading only. It is not a guarantee of profit an
   - rebalance every 7 trading days
 - Mid-breadth mode:
   - if `50% <= breadth20 < 66%`, usually hold cash instead of the normal momentum basket
-  - if `50% <= breadth20 < 66%` and SPY 20-day return is at least `+3%`, open a 63-day top-3 sleeve at `1.2` gross
+  - if `50% <= breadth20 < 66%` and SPY 20-day return is at least `+2.5%`, open a 63-day top-3 sleeve at `1.3` gross
 - Loss-regime sleeves:
   - SPY 20-day return `< -5%`: 5-day top 7, momentum `>= 0`
   - SPY 63-day drawdown `-2%` to `-5%`: 63-day top 5, momentum `>= 0`
@@ -44,7 +44,7 @@ After paper-trading buying-power checks, the Alpaca basket filled closer to `1.2
 | Candidate | Return | Sharpe | Max DD | Profit Factor | Trades | Worst Month | Avg Gross | Max Gross |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | current mid-breadth cash, 1.2 gross | 88.61x | 2.45 | -32.3% | 3.01 | 511 | -16.6% | 0.95 | 1.24 |
-| mid-breadth SPY20 >= +3%, top3 sleeve at 1.2 gross | 178.68x | 2.74 | -32.3% | 3.49 | 520 | -16.6% | 0.98 | 1.24 |
+| mid-breadth SPY20 >= +2.5%, top3 sleeve at 1.3 gross | 225.49x | 2.83 | -32.3% | 3.53 | 526 | -16.6% | 1.00 | 1.31 |
 
 ## Stress Results
 

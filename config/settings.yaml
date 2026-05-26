@@ -26,9 +26,9 @@ pure_momentum:
   breadth_lookback_days: 20
   mid_breadth_cash_low: 0.50
   mid_breadth_cash_high: 0.66
-  mid_breadth_sleeve_spy20_min: 0.03
+  mid_breadth_sleeve_spy20_min: 0.025
   mid_breadth_sleeve_top_n: 3
-  mid_breadth_sleeve_gross_leverage: 1.2
+  mid_breadth_sleeve_gross_leverage: 1.3
   weak_breadth_threshold: 0.33
   cost_per_turnover: 0.0005
   universe:
