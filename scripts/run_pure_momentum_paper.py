@@ -44,13 +44,14 @@ class PaperOrderPlan:
         return float(self.qty * self.price)
 
     def payload(self, run_key: str) -> dict[str, Any]:
+        suffix = f"{int(time.time() * 1000)}"
         return {
             "symbol": self.symbol,
             "qty": str(self.qty),
             "side": self.side,
             "type": "market",
             "time_in_force": "day",
-            "client_order_id": f"{MANAGED_ORDER_PREFIX}-{run_key}-{self.symbol.lower()}-{self.side}",
+            "client_order_id": f"{MANAGED_ORDER_PREFIX}-{run_key}-{self.symbol.lower()}-{self.side}-{suffix}",
         }
 
     def resized(self, qty: int) -> "PaperOrderPlan":
@@ -341,7 +342,7 @@ def submit_plans(
                         }
                     )
                 else:
-                    row["state"] = "rejected_insufficient_buying_power"
+                    row["state"] = "rejected_insufficient_buying_power" if buying_power is not None else "rejected_order_error"
                     row["error"] = str(exc)
             time.sleep(0.5)
         submitted.append(row)
