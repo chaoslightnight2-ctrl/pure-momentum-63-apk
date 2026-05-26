@@ -9,7 +9,7 @@ reports:
   directory: reports
 
 pure_momentum:
-  name: pure_momentum_mid_breadth_cash_gross18
+  name: pure_momentum_mid_breadth_spy20_sleeve_gross18
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 7
@@ -26,6 +26,9 @@ pure_momentum:
   breadth_lookback_days: 20
   mid_breadth_cash_low: 0.50
   mid_breadth_cash_high: 0.66
+  mid_breadth_sleeve_spy20_min: 0.03
+  mid_breadth_sleeve_top_n: 3
+  mid_breadth_sleeve_gross_leverage: 0.8
   weak_breadth_threshold: 0.33
   cost_per_turnover: 0.0005
   universe:

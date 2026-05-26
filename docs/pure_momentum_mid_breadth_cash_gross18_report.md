@@ -1,4 +1,4 @@
-# Pure Momentum Mid-Breadth Cash Gross 1.8
+# Pure Momentum Mid-Breadth SPY20 Sleeve Gross 1.8
 
 Research date: 2026-05-26
 
@@ -14,8 +14,9 @@ This is research-only and paper-trading only. It is not a guarantee of profit an
   - select top 7
   - target gross exposure: `1.8`
   - rebalance every 7 trading days
-- Mid-breadth cash mode:
-  - if `50% <= breadth20 < 66%`, hold cash instead of the normal momentum basket
+- Mid-breadth mode:
+  - if `50% <= breadth20 < 66%`, usually hold cash instead of the normal momentum basket
+  - if `50% <= breadth20 < 66%` and SPY 20-day return is at least `+3%`, open a smaller 63-day top-3 sleeve at `0.8` gross
 - Loss-regime sleeves:
   - SPY 20-day return `< -5%`: 5-day top 7, momentum `>= 0`
   - SPY 63-day drawdown `-2%` to `-5%`: 63-day top 5, momentum `>= 0`
@@ -35,6 +36,15 @@ Benchmark: SPY total return over the same period: `105.9%`.
 | previous final switch | 300.10x | 2.25 | -57.0% | 2.21 | 646 | -27.7% | 1.64 | 2.47 |
 | normal mom5 filter | 458.88x | 2.35 | -58.0% | 2.37 | 580 | -25.5% | 1.63 | 2.47 |
 | mid-breadth cash gross 1.8 | 532.01x | 2.46 | -45.5% | 3.17 | 511 | -25.5% | 1.42 | 2.11 |
+
+## Alpaca Effective-Gross Variant
+
+After paper-trading buying-power checks, the Alpaca basket filled closer to `1.2` effective gross than the nominal `1.8` target. A broker-realistic 1.2-gross research pass tested a smaller mid-breadth sleeve:
+
+| Candidate | Return | Sharpe | Max DD | Profit Factor | Trades | Worst Month | Avg Gross | Max Gross |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| current mid-breadth cash, 1.2 gross | 88.61x | 2.45 | -32.3% | 3.01 | 511 | -16.6% | 0.95 | 1.24 |
+| mid-breadth SPY20 >= +3%, top3 sleeve at 0.8 gross | 144.90x | 2.66 | -32.3% | 3.33 | 520 | -16.6% | 0.97 | 1.25 |
 
 ## Stress Results
 

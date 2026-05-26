@@ -72,6 +72,7 @@ class SelectionResult:
     breadth20: float | None
     spy20: float | None
     spy_dd63: float | None
+    target_gross_override: float | None = None
 
 
 def latest_completed_daily_close(raw: pd.DataFrame) -> pd.DataFrame:
@@ -129,6 +130,10 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     breadth_lookback = int(strategy_cfg.get("breadth_lookback_days", 20))
     mid_low = float(strategy_cfg.get("mid_breadth_cash_low", 0.50))
     mid_high = float(strategy_cfg.get("mid_breadth_cash_high", 0.66))
+    mid_sleeve_spy20_min = float(strategy_cfg.get("mid_breadth_sleeve_spy20_min", 0.03))
+    mid_sleeve_top_n = int(strategy_cfg.get("mid_breadth_sleeve_top_n", 3))
+    mid_sleeve_gross_raw = strategy_cfg.get("mid_breadth_sleeve_gross_leverage")
+    mid_sleeve_gross = None if mid_sleeve_gross_raw is None else float(mid_sleeve_gross_raw)
     weak_breadth = float(strategy_cfg.get("weak_breadth_threshold", 0.33))
     spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
 
@@ -171,6 +176,15 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
             breadth20,
             spy20,
             spy_dd63,
+        )
+    if mid_low <= breadth20 < mid_high and mid_sleeve_gross is not None and spy20 >= mid_sleeve_spy20_min:
+        return SelectionResult(
+            rank_symbols(close, universe, lookback_days, mid_sleeve_top_n, min_momentum),
+            "normal_mid_breadth_spy20_top3_gross08",
+            breadth20,
+            spy20,
+            spy_dd63,
+            mid_sleeve_gross,
         )
     if mid_low <= breadth20 < mid_high:
         return SelectionResult([], "normal_mid_breadth_cash", breadth20, spy20, spy_dd63)
@@ -570,7 +584,7 @@ def main() -> None:
     buy_submission_rounds = int(strategy_cfg.get("buy_submission_rounds", 10))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
-    strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_cash_gross18"))
+    strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_spy20_sleeve_gross18"))
     state = load_state(args.state_path)
 
     client = AlpacaPaperTradingClient.from_env()
@@ -664,7 +678,8 @@ def main() -> None:
         buying_power = float(account.get("buying_power") or 0.0)
         current_qty = {}
 
-    plans = build_plan(close, chosen, current_qty, equity, target_gross, max_gross)
+    active_target_gross = selection.target_gross_override if selection.target_gross_override is not None else target_gross
+    plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross)
     if should_block_new_buys(account):
         plans = [plan for plan in plans if plan.side == "sell"]
 
@@ -709,6 +724,8 @@ def main() -> None:
         "spy_dd63": selection.spy_dd63,
         "current_qty": current_qty,
         "target_gross_leverage": target_gross,
+        "active_target_gross_leverage": active_target_gross,
+        "selection_target_gross_override": selection.target_gross_override,
         "max_gross_leverage": max_gross,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,

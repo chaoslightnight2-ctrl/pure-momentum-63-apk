@@ -40,6 +40,9 @@ public class BotService extends Service {
     private static final double NORMAL_MIN_5D_MOMENTUM = 0.0;
     private static final double MID_BREADTH_CASH_LOW = 0.50;
     private static final double MID_BREADTH_CASH_HIGH = 0.66;
+    private static final double MID_BREADTH_SLEEVE_SPY20_MIN = 0.03;
+    private static final int MID_BREADTH_SLEEVE_TOP_N = 3;
+    private static final double MID_BREADTH_SLEEVE_TARGET_GROSS = 0.80;
     private static final double WEAK_BREADTH_THRESHOLD = 0.33;
     private static final double DAILY_BUY_BLOCK_LOSS_PCT = 0.02;
     private static final double SESSION_BUY_BLOCK_DRAWDOWN_PCT = 0.025;
@@ -276,14 +279,15 @@ public class BotService extends Service {
         Map<String, Series> data = new HashMap<>();
         for (String symbol : PURE_MOMENTUM_UNIVERSE) data.put(symbol, fetchYahoo(symbol));
         data.put(REGIME_SYMBOL, fetchYahoo(REGIME_SYMBOL));
-        ArrayList<String> selected = selectStrategySymbols(data);
+        StrategySelection selection = selectStrategySymbols(data);
+        ArrayList<String> selected = selection.symbols;
 
         Map<String, Double> exposure = new HashMap<>();
         Map<String, Double> lastClose = new HashMap<>();
         Map<String, Double> livePrice = new HashMap<>();
         Map<String, Double> stopPrice = new HashMap<>();
         int count = selected.size();
-        double eachExposure = count > 0 ? PURE_MOMENTUM_TARGET_GROSS / count : 0.0;
+        double eachExposure = count > 0 ? selection.targetGross / count : 0.0;
         for (String symbol : selected) exposure.put(symbol, eachExposure);
         for (String symbol : managedSymbols(currentQty)) {
             Series s = data.containsKey(symbol) ? data.get(symbol) : fetchYahoo(symbol);
@@ -314,16 +318,19 @@ public class BotService extends Service {
         return new PlanResult(plans, stopPrice);
     }
 
-    private ArrayList<String> selectStrategySymbols(Map<String, Series> data) {
+    private StrategySelection selectStrategySymbols(Map<String, Series> data) {
         double breadth20 = breadth20(data);
         double spy20 = momentum(data.get(REGIME_SYMBOL).close, 20);
         double spyDd63 = drawdownFromHigh(data.get(REGIME_SYMBOL).close, 63);
-        if (spy20 < -0.05) return rankSymbols(data, 5, 7, 0.0, null);
-        if (spyDd63 >= -0.05 && spyDd63 <= -0.02) return rankSymbols(data, 63, 5, 0.0, null);
-        if (breadth20 < WEAK_BREADTH_THRESHOLD) return rankSymbols(data, 63, 5, 0.0, null);
-        if (spy20 >= -0.02 && spy20 < 0.0) return rankSymbols(data, 63, 5, 0.0, null);
-        if (breadth20 >= MID_BREADTH_CASH_LOW && breadth20 < MID_BREADTH_CASH_HIGH) return new ArrayList<>();
-        return rankSymbols(data, PURE_MOMENTUM_LOOKBACK_DAYS, PURE_MOMENTUM_TOP_N, 0.0, NORMAL_MIN_5D_MOMENTUM);
+        if (spy20 < -0.05) return new StrategySelection(rankSymbols(data, 5, 7, 0.0, null), PURE_MOMENTUM_TARGET_GROSS, "loss_spy20_crash_lb5_top7");
+        if (spyDd63 >= -0.05 && spyDd63 <= -0.02) return new StrategySelection(rankSymbols(data, 63, 5, 0.0, null), PURE_MOMENTUM_TARGET_GROSS, "loss_spy_dd_2_5_lb63_top5");
+        if (breadth20 < WEAK_BREADTH_THRESHOLD) return new StrategySelection(rankSymbols(data, 63, 5, 0.0, null), PURE_MOMENTUM_TARGET_GROSS, "loss_weak_breadth_lb63_top5");
+        if (spy20 >= -0.02 && spy20 < 0.0) return new StrategySelection(rankSymbols(data, 63, 5, 0.0, null), PURE_MOMENTUM_TARGET_GROSS, "loss_spy20_mild_neg_lb63_top5");
+        if (breadth20 >= MID_BREADTH_CASH_LOW && breadth20 < MID_BREADTH_CASH_HIGH && spy20 >= MID_BREADTH_SLEEVE_SPY20_MIN) {
+            return new StrategySelection(rankSymbols(data, 63, MID_BREADTH_SLEEVE_TOP_N, 0.0, null), MID_BREADTH_SLEEVE_TARGET_GROSS, "normal_mid_breadth_spy20_top3_gross08");
+        }
+        if (breadth20 >= MID_BREADTH_CASH_LOW && breadth20 < MID_BREADTH_CASH_HIGH) return new StrategySelection(new ArrayList<String>(), 0.0, "normal_mid_breadth_cash");
+        return new StrategySelection(rankSymbols(data, PURE_MOMENTUM_LOOKBACK_DAYS, PURE_MOMENTUM_TOP_N, 0.0, NORMAL_MIN_5D_MOMENTUM), PURE_MOMENTUM_TARGET_GROSS, "normal_lb63_top7_mom5_pos");
     }
 
     private ArrayList<String> rankSymbols(Map<String, Series> data, int lookbackDays, int topN, Double minMomentum, Double minShortMomentum) {
@@ -937,6 +944,16 @@ public class BotService extends Service {
     static class MomentumRank {
         String symbol; double momentum;
         MomentumRank(String symbol, double momentum) { this.symbol = symbol; this.momentum = momentum; }
+    }
+    static class StrategySelection {
+        ArrayList<String> symbols;
+        double targetGross;
+        String mode;
+        StrategySelection(ArrayList<String> symbols, double targetGross, String mode) {
+            this.symbols = symbols;
+            this.targetGross = targetGross;
+            this.mode = mode;
+        }
     }
     static class PlanResult {
         ArrayList<OrderPlan> orders;
