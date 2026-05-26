@@ -1,0 +1,57 @@
+name: Flatten Paper Positions
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type FLATTEN_PAPER_POSITIONS to close all Alpaca paper positions"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flatten-paper-positions
+  cancel-in-progress: false
+
+jobs:
+  flatten-paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Istanbul
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile flatten runner
+        run: |
+          python -m py_compile scripts/flatten_paper_positions.py src/trading/alpaca_paper.py src/utils/io_utils.py
+
+      - name: Flatten all paper positions
+        shell: bash
+        run: |
+          python scripts/flatten_paper_positions.py --confirm "${{ github.event.inputs.confirm }}"
+
+      - name: Upload flatten report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatten-paper-positions
+          path: reports/flatten_paper_positions.json
+          if-no-files-found: ignore
