@@ -120,6 +120,33 @@ def rank_symbols(
     return [str(symbol) for symbol in momentum.head(top_n).index]
 
 
+def rank_symbols_composite_momentum(
+    close: pd.DataFrame,
+    symbols: list[str],
+    top_n: int,
+    min_momentum_63d: float | None,
+    weights: dict[str, float],
+) -> list[str]:
+    universe = [symbol for symbol in symbols if symbol in close.columns]
+    if len(close) <= 63 or not universe:
+        return []
+
+    latest = close[universe].iloc[-1]
+    mom63 = latest / close[universe].iloc[-64] - 1.0
+    mom20 = latest / close[universe].iloc[-21] - 1.0
+    mom5 = latest / close[universe].iloc[-6] - 1.0
+    score = (
+        float(weights.get("momentum_63", 0.40)) * mom63
+        + float(weights.get("momentum_20", 0.40)) * mom20
+        + float(weights.get("momentum_5", 0.20)) * mom5
+    )
+    scores = pd.DataFrame({"score": score, "mom63": mom63}).replace([float("inf"), float("-inf")], pd.NA).dropna()
+    if min_momentum_63d is not None:
+        scores = scores.loc[scores["mom63"] >= min_momentum_63d]
+    scores = scores.sort_values("score", ascending=False)
+    return [str(symbol) for symbol in scores.head(top_n).index]
+
+
 def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], universe: list[str]) -> SelectionResult:
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     top_n = int(strategy_cfg.get("top_n", 7))
@@ -135,6 +162,8 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     mid_sleeve_gross_raw = strategy_cfg.get("mid_breadth_sleeve_gross_leverage")
     mid_sleeve_gross = None if mid_sleeve_gross_raw is None else float(mid_sleeve_gross_raw)
     weak_breadth = float(strategy_cfg.get("weak_breadth_threshold", 0.33))
+    weak_breadth_score = str(strategy_cfg.get("weak_breadth_score", "momentum_63")).lower()
+    weak_breadth_score_weights = strategy_cfg.get("weak_breadth_score_weights", {})
     spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
 
     if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns:
@@ -162,6 +191,14 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
             spy_dd63,
         )
     if breadth20 < weak_breadth:
+        if weak_breadth_score == "composite_63_20_5":
+            return SelectionResult(
+                rank_symbols_composite_momentum(close, universe, 5, min_momentum, weak_breadth_score_weights),
+                "loss_weak_breadth_comp_40_40_20_top5",
+                breadth20,
+                spy20,
+                spy_dd63,
+            )
         return SelectionResult(
             rank_symbols(close, universe, lookback_days, 5, min_momentum),
             "loss_weak_breadth_lb63_top5",
