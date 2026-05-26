@@ -64,6 +64,15 @@ class PaperOrderPlan:
         )
 
 
+@dataclass(frozen=True)
+class SelectionResult:
+    symbols: list[str]
+    mode: str
+    breadth20: float | None
+    spy20: float | None
+    spy_dd63: float | None
+
+
 def latest_completed_daily_close(raw: pd.DataFrame) -> pd.DataFrame:
     close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
     if isinstance(close, pd.Series):
@@ -89,12 +98,88 @@ def fetch_close_frame(symbols: list[str], lookback_days: int) -> pd.DataFrame:
     return close
 
 
-def selected_symbols(close: pd.DataFrame, lookback_days: int, top_n: int, min_momentum: float | None) -> list[str]:
-    momentum = close.iloc[-1] / close.iloc[-lookback_days - 1] - 1.0
-    momentum = momentum.replace([float("inf"), float("-inf")], pd.NA).dropna().sort_values(ascending=False)
+def rank_symbols(
+    close: pd.DataFrame,
+    symbols: list[str],
+    lookback_days: int,
+    top_n: int,
+    min_momentum: float | None,
+    min_short_momentum: float | None = None,
+) -> list[str]:
+    momentum = close[symbols].iloc[-1] / close[symbols].iloc[-lookback_days - 1] - 1.0
+    momentum = momentum.replace([float("inf"), float("-inf")], pd.NA).dropna()
     if min_momentum is not None:
         momentum = momentum.loc[momentum >= min_momentum]
+    if min_short_momentum is not None:
+        short_momentum = close[symbols].iloc[-1] / close[symbols].iloc[-6] - 1.0
+        short_momentum = short_momentum.replace([float("inf"), float("-inf")], pd.NA)
+        momentum = momentum.loc[short_momentum.reindex(momentum.index) >= min_short_momentum]
+    momentum = momentum.sort_values(ascending=False)
     return [str(symbol) for symbol in momentum.head(top_n).index]
+
+
+def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], universe: list[str]) -> SelectionResult:
+    lookback_days = int(strategy_cfg.get("lookback_days", 63))
+    top_n = int(strategy_cfg.get("top_n", 7))
+    min_momentum_raw = strategy_cfg.get("min_momentum")
+    min_momentum = None if min_momentum_raw is None else float(min_momentum_raw)
+    min_short_raw = strategy_cfg.get("normal_min_5d_momentum")
+    min_short_momentum = None if min_short_raw is None else float(min_short_raw)
+    breadth_lookback = int(strategy_cfg.get("breadth_lookback_days", 20))
+    mid_low = float(strategy_cfg.get("mid_breadth_cash_low", 0.50))
+    mid_high = float(strategy_cfg.get("mid_breadth_cash_high", 0.66))
+    weak_breadth = float(strategy_cfg.get("weak_breadth_threshold", 0.33))
+    spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
+
+    if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns:
+        return SelectionResult([], "insufficient_regime_data", None, None, None)
+
+    breadth20 = float(((close[universe].iloc[-1] / close[universe].iloc[-breadth_lookback - 1] - 1.0) > 0.0).mean())
+    spy = close[spy_symbol]
+    spy20 = float(spy.iloc[-1] / spy.iloc[-breadth_lookback - 1] - 1.0)
+    spy_dd63 = float(spy.iloc[-1] / spy.iloc[-63:].max() - 1.0)
+
+    if spy20 < -0.05:
+        return SelectionResult(
+            rank_symbols(close, universe, 5, 7, min_momentum),
+            "loss_spy20_crash_lb5_top7",
+            breadth20,
+            spy20,
+            spy_dd63,
+        )
+    if -0.05 <= spy_dd63 <= -0.02:
+        return SelectionResult(
+            rank_symbols(close, universe, lookback_days, 5, min_momentum),
+            "loss_spy_dd_2_5_lb63_top5",
+            breadth20,
+            spy20,
+            spy_dd63,
+        )
+    if breadth20 < weak_breadth:
+        return SelectionResult(
+            rank_symbols(close, universe, lookback_days, 5, min_momentum),
+            "loss_weak_breadth_lb63_top5",
+            breadth20,
+            spy20,
+            spy_dd63,
+        )
+    if -0.02 <= spy20 < 0.0:
+        return SelectionResult(
+            rank_symbols(close, universe, lookback_days, 5, min_momentum),
+            "loss_spy20_mild_neg_lb63_top5",
+            breadth20,
+            spy20,
+            spy_dd63,
+        )
+    if mid_low <= breadth20 < mid_high:
+        return SelectionResult([], "normal_mid_breadth_cash", breadth20, spy20, spy_dd63)
+    return SelectionResult(
+        rank_symbols(close, universe, lookback_days, top_n, min_momentum, min_short_momentum),
+        "normal_lb63_top7_mom5_pos",
+        breadth20,
+        spy20,
+        spy_dd63,
+    )
 
 
 def load_state(path: str | Path) -> dict[str, Any]:
@@ -390,16 +475,16 @@ def main() -> None:
     config = load_yaml_config(args.config)
     strategy_cfg = config.get("pure_momentum", {})
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
+    regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
+    data_symbols = sorted(set(symbols + [regime_symbol]))
     universe = set(symbols)
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
-    top_n = int(strategy_cfg.get("top_n", 3))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
-    min_momentum_raw = strategy_cfg.get("min_momentum")
-    min_momentum = None if min_momentum_raw is None else float(min_momentum_raw)
+    strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_cash_gross18"))
     state = load_state(args.state_path)
 
     client = AlpacaPaperTradingClient.from_env()
@@ -414,8 +499,9 @@ def main() -> None:
         print(json.dumps(report, indent=2))
         return
 
-    close = fetch_close_frame(symbols, lookback_days)
-    chosen = selected_symbols(close, lookback_days, top_n, min_momentum)
+    close = fetch_close_frame(data_symbols, max(lookback_days, 63))
+    selection = select_strategy_symbols(close, strategy_cfg, symbols)
+    chosen = selection.symbols
     positions = client.get_positions()
     current_qty = managed_positions(positions, universe)
     due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
@@ -429,6 +515,7 @@ def main() -> None:
             "status": "blocked_open_order",
             "message": "Open managed-symbol order exists; duplicate paper orders blocked.",
             "selected_symbols": chosen,
+            "selection_mode": selection.mode,
             "last_rebalance_date": state.get("last_rebalance_date"),
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_due_reason": due_reason,
@@ -442,6 +529,7 @@ def main() -> None:
             "status": "not_rebalance_day",
             "message": "Pure Momentum 63 rebalance is not due today.",
             "selected_symbols": chosen,
+            "selection_mode": selection.mode,
             "current_qty": current_qty,
             "last_rebalance_date": state.get("last_rebalance_date"),
             "trading_days_since_rebalance": trading_days_elapsed,
@@ -463,7 +551,7 @@ def main() -> None:
             report = {
                 "status": "flatten_submitted_waiting_rebalance",
                 "execute": bool(args.execute),
-                "strategy": "pure_momentum_lb63_top3_reb5",
+                "strategy": strategy_name,
                 "selected_symbols": chosen,
                 "current_qty": current_qty,
                 "remaining_qty": remaining_positions,
@@ -503,7 +591,7 @@ def main() -> None:
                 "last_selected_symbols": chosen,
                 "last_order_count": len(submitted),
                 "last_rebalance_reason": due_reason,
-                "strategy": "pure_momentum_lb63_top3_reb5",
+                "strategy": strategy_name,
             }
         )
         save_state(args.state_path, state)
@@ -511,8 +599,12 @@ def main() -> None:
     report = {
         "status": "submitted" if args.execute else "dry_run",
         "execute": bool(args.execute),
-        "strategy": "pure_momentum_lb63_top3_reb5",
+        "strategy": strategy_name,
         "selected_symbols": chosen,
+        "selection_mode": selection.mode,
+        "breadth20": selection.breadth20,
+        "spy20": selection.spy20,
+        "spy_dd63": selection.spy_dd63,
         "current_qty": current_qty,
         "target_gross_leverage": target_gross,
         "max_gross_leverage": max_gross,

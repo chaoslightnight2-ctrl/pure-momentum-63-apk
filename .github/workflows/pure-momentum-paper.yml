@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       force_rebalance:
-        description: "Force rebalance even if the 5-trading-day gate is not due"
+        description: "Force rebalance even if the 7-trading-day gate is not due"
         required: false
         default: "false"
   schedule:
     # Weekdays once after the regular US market open. The bot still checks
-    # Alpaca market-open status and only rebalances after 5 trading days.
+    # Alpaca market-open status and only rebalances after 7 trading days.
     - cron: "45 14 * * 1-5"
 
 permissions:

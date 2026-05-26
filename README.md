@@ -6,7 +6,7 @@ Android Alpaca paper trading app for the Pure Momentum 63 strategy.
 
 - APK: `apk/PureMomentum63-debug.apk`
 - Application ID: `com.quant.puremomentum63`
-- Strategy: `pure_momentum_lb63_top3_reb5`
+- Strategy: `pure_momentum_mid_breadth_cash_gross18`
 - Alpaca endpoint: paper trading only
 
 The app asks for the Alpaca paper API key and secret on the phone. Do not commit real keys.
@@ -17,7 +17,7 @@ Pure Momentum 63 ranks this universe by 63 trading-day momentum:
 
 `TQQQ, TECL, SOXL, UPRO, SPXL, MSTR, COIN, MARA, RIOT, NVDA, AMD, PLTR, SMCI, TSLA, CVNA, APP, HOOD`
 
-It selects the strongest 3 symbols, targets 2.0 gross exposure split equally, and rebalances every 5 trading days. The Android foreground service wakes every 15 minutes, checks Alpaca market-open status, and only sends orders when the market is open and a rebalance is due.
+It normally selects the strongest 7 symbols by 63 trading-day momentum, requires positive 63-day and 5-day symbol momentum, targets 1.8 gross exposure split equally, and rebalances every 7 trading days. If breadth20 is between 50% and 66%, it holds cash instead of opening the normal momentum basket. In loss regimes it uses the tested defensive sleeves: SPY 20-day crash uses 5-day top 7; SPY 63-day drawdown -2% to -5%, weak breadth, and mild negative SPY20 use 63-day top 5.
 
 ## Paper Safety
 
@@ -40,7 +40,7 @@ This repo does not enable live trading.
 
 - UTC cron: `17 */3 * * *`
 
-The workflow still checks Alpaca market-open status, existing open orders, buying power, and the 5-trading-day rebalance gate before sending paper orders. If the market is closed or rebalance is not due, it exits without orders.
+The workflow still checks Alpaca market-open status, existing open orders, buying power, and the 7-trading-day rebalance gate before sending paper orders. If the market is closed or rebalance is not due, it exits without orders.
 
 Rebalance state is kept in `state/pure_momentum_state.json`. After a successful paper rebalance run, GitHub Actions commits the latest rebalance date back to the repository so later 3-hour runs do not repeat the same rebalance.
 

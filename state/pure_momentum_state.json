@@ -8,5 +8,5 @@
     "AMD",
     "TECL"
   ],
-  "strategy": "pure_momentum_lb63_top3_reb5"
+  "strategy": "pure_momentum_mid_breadth_cash_gross18"
 }

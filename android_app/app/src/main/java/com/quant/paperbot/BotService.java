@@ -32,11 +32,15 @@ import java.util.TimeZone;
 public class BotService extends Service {
     private static final String CHANNEL_ID = "quant_bot_running_v3";
     private static final double CAPITAL = 100000.0;
-    private static final double GROSS_CAP = 2.00;
+    private static final double GROSS_CAP = 1.80;
     private static final int PURE_MOMENTUM_LOOKBACK_DAYS = 63;
-    private static final int PURE_MOMENTUM_TOP_N = 3;
-    private static final int PURE_MOMENTUM_REBALANCE_DAYS = 5;
-    private static final double PURE_MOMENTUM_TARGET_GROSS = 2.00;
+    private static final int PURE_MOMENTUM_TOP_N = 7;
+    private static final int PURE_MOMENTUM_REBALANCE_DAYS = 7;
+    private static final double PURE_MOMENTUM_TARGET_GROSS = 1.80;
+    private static final double NORMAL_MIN_5D_MOMENTUM = 0.0;
+    private static final double MID_BREADTH_CASH_LOW = 0.50;
+    private static final double MID_BREADTH_CASH_HIGH = 0.66;
+    private static final double WEAK_BREADTH_THRESHOLD = 0.33;
     private static final double DAILY_BUY_BLOCK_LOSS_PCT = 0.02;
     private static final double SESSION_BUY_BLOCK_DRAWDOWN_PCT = 0.025;
     private static final double MIN_PROTECTIVE_STOP_DISTANCE_PCT = 0.015;
@@ -56,6 +60,7 @@ public class BotService extends Service {
         "TQQQ", "TECL", "SOXL", "UPRO", "SPXL", "MSTR", "COIN", "MARA", "RIOT",
         "NVDA", "AMD", "PLTR", "SMCI", "TSLA", "CVNA", "APP", "HOOD"
     };
+    private static final String REGIME_SYMBOL = "SPY";
     private static final String[] LEGACY_MANAGED_SYMBOLS = new String[] {
         "AVGO", "TSLA", "NVDA", "GLD"
     };
@@ -139,7 +144,7 @@ public class BotService extends Service {
         double sessionHigh = updateSessionHighEquity(equity);
         boolean blockNewBuys = shouldBlockNewBuys(equity, lastEquity, sessionHigh);
         if (!pureMomentumRebalanceDue(currentQty)) {
-            saveDashboard("rebalance bekliyor", "Pure momentum 5 gunluk rebalance penceresini bekliyor; bugun emir gonderilmedi.", recentOrders, withEstimatedNotional(baseStats, 0));
+            saveDashboard("rebalance bekliyor", "Pure momentum 7 gunluk rebalance penceresini bekliyor; bugun emir gonderilmedi.", recentOrders, withEstimatedNotional(baseStats, 0));
             markEvaluatedToday();
             return;
         }
@@ -270,20 +275,16 @@ public class BotService extends Service {
     private PlanResult buildPlans(Map<String, Double> currentQty, double capital, String apiKey, String secret) throws Exception {
         Map<String, Series> data = new HashMap<>();
         for (String symbol : PURE_MOMENTUM_UNIVERSE) data.put(symbol, fetchYahoo(symbol));
-        ArrayList<MomentumRank> ranks = new ArrayList<>();
-        for (String symbol : data.keySet()) {
-            double momentum = momentum63(data.get(symbol).close);
-            if (!Double.isNaN(momentum)) ranks.add(new MomentumRank(symbol, momentum));
-        }
-        ranks.sort((a, b) -> Double.compare(b.momentum, a.momentum));
+        data.put(REGIME_SYMBOL, fetchYahoo(REGIME_SYMBOL));
+        ArrayList<String> selected = selectStrategySymbols(data);
 
         Map<String, Double> exposure = new HashMap<>();
         Map<String, Double> lastClose = new HashMap<>();
         Map<String, Double> livePrice = new HashMap<>();
         Map<String, Double> stopPrice = new HashMap<>();
-        int count = Math.min(PURE_MOMENTUM_TOP_N, ranks.size());
+        int count = selected.size();
         double eachExposure = count > 0 ? PURE_MOMENTUM_TARGET_GROSS / count : 0.0;
-        for (int i = 0; i < count; i++) exposure.put(ranks.get(i).symbol, eachExposure);
+        for (String symbol : selected) exposure.put(symbol, eachExposure);
         for (String symbol : managedSymbols(currentQty)) {
             Series s = data.containsKey(symbol) ? data.get(symbol) : fetchYahoo(symbol);
             lastClose.put(symbol, s.close[s.close.length - 1]);
@@ -311,6 +312,53 @@ public class BotService extends Service {
             plans.add(new OrderPlan(symbol, sell ? "sell" : "buy", qty, notional, stopPrice.containsKey(symbol) ? stopPrice.get(symbol) : 0.0, targetQty));
         }
         return new PlanResult(plans, stopPrice);
+    }
+
+    private ArrayList<String> selectStrategySymbols(Map<String, Series> data) {
+        double breadth20 = breadth20(data);
+        double spy20 = momentum(data.get(REGIME_SYMBOL).close, 20);
+        double spyDd63 = drawdownFromHigh(data.get(REGIME_SYMBOL).close, 63);
+        if (spy20 < -0.05) return rankSymbols(data, 5, 7, 0.0, null);
+        if (spyDd63 >= -0.05 && spyDd63 <= -0.02) return rankSymbols(data, 63, 5, 0.0, null);
+        if (breadth20 < WEAK_BREADTH_THRESHOLD) return rankSymbols(data, 63, 5, 0.0, null);
+        if (spy20 >= -0.02 && spy20 < 0.0) return rankSymbols(data, 63, 5, 0.0, null);
+        if (breadth20 >= MID_BREADTH_CASH_LOW && breadth20 < MID_BREADTH_CASH_HIGH) return new ArrayList<>();
+        return rankSymbols(data, PURE_MOMENTUM_LOOKBACK_DAYS, PURE_MOMENTUM_TOP_N, 0.0, NORMAL_MIN_5D_MOMENTUM);
+    }
+
+    private ArrayList<String> rankSymbols(Map<String, Series> data, int lookbackDays, int topN, Double minMomentum, Double minShortMomentum) {
+        ArrayList<MomentumRank> ranks = new ArrayList<>();
+        for (String symbol : PURE_MOMENTUM_UNIVERSE) {
+            Series series = data.get(symbol);
+            if (series == null) continue;
+            double value = momentum(series.close, lookbackDays);
+            if (Double.isNaN(value)) continue;
+            if (minMomentum != null && value < minMomentum) continue;
+            if (minShortMomentum != null) {
+                double shortMomentum = momentum(series.close, 5);
+                if (Double.isNaN(shortMomentum) || shortMomentum < minShortMomentum) continue;
+            }
+            ranks.add(new MomentumRank(symbol, value));
+        }
+        ranks.sort((a, b) -> Double.compare(b.momentum, a.momentum));
+        ArrayList<String> selected = new ArrayList<>();
+        int count = Math.min(topN, ranks.size());
+        for (int i = 0; i < count; i++) selected.add(ranks.get(i).symbol);
+        return selected;
+    }
+
+    private double breadth20(Map<String, Series> data) {
+        int valid = 0;
+        int positive = 0;
+        for (String symbol : PURE_MOMENTUM_UNIVERSE) {
+            Series series = data.get(symbol);
+            if (series == null) continue;
+            double value = momentum(series.close, 20);
+            if (Double.isNaN(value)) continue;
+            valid++;
+            if (value > 0.0) positive++;
+        }
+        return valid > 0 ? ((double) positive) / valid : 0.0;
     }
 
     private ArrayList<OrderPlan> safeExecutablePlans(ArrayList<OrderPlan> plans, Map<String, Double> currentQty) {
@@ -383,10 +431,18 @@ public class BotService extends Service {
         return Math.max(0.01, Math.min(stopPrice, bufferedCap));
     }
 
-    private double momentum63(double[] close) {
+    private double momentum(double[] close, int lookbackDays) {
         int i = close.length - 1;
-        if (i < PURE_MOMENTUM_LOOKBACK_DAYS) return Double.NaN;
-        return close[i] / close[i - PURE_MOMENTUM_LOOKBACK_DAYS] - 1.0;
+        if (i < lookbackDays || close[i - lookbackDays] == 0.0) return Double.NaN;
+        return close[i] / close[i - lookbackDays] - 1.0;
+    }
+
+    private double drawdownFromHigh(double[] close, int lookbackDays) {
+        int last = close.length - 1;
+        if (last < lookbackDays) return Double.NaN;
+        double high = 0.0;
+        for (int i = last - lookbackDays + 1; i <= last; i++) high = Math.max(high, close[i]);
+        return high > 0.0 ? close[last] / high - 1.0 : Double.NaN;
     }
 
     private Series fetchYahoo(String symbol) throws Exception {

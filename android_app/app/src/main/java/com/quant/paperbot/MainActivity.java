@@ -55,7 +55,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Pure momentum: 63g top 3, ana paranin 2x'i kadar alim gucu");
+        subtitle.setText("Pure momentum: 63g top 7, breadth cash, 1.8x paper hedef gross");
         subtitle.setTextColor(Color.rgb(203, 213, 225));
         subtitle.setTextSize(13);
         subtitle.setPadding(0, 0, 0, 12);

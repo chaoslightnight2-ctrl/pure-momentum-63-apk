@@ -9,15 +9,22 @@ reports:
   directory: reports
 
 pure_momentum:
+  name: pure_momentum_mid_breadth_cash_gross18
   backtest_start: "2023-04-25"
   lookback_days: 63
-  top_n: 3
-  rebalance_days: 5
+  top_n: 7
+  rebalance_days: 7
   sell_all_before_rebalance: true
   flatten_wait_seconds: 60
-  target_gross_leverage: 2.0
-  max_gross_leverage: 2.0
-  min_momentum:
+  target_gross_leverage: 1.8
+  max_gross_leverage: 1.8
+  min_momentum: 0.0
+  normal_min_5d_momentum: 0.0
+  regime_symbol: SPY
+  breadth_lookback_days: 20
+  mid_breadth_cash_low: 0.50
+  mid_breadth_cash_high: 0.66
+  weak_breadth_threshold: 0.33
   cost_per_turnover: 0.0005
   universe:
     - TQQQ
