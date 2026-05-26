@@ -17,7 +17,7 @@ Pure Momentum 63 ranks this universe by 63 trading-day momentum:
 
 `TQQQ, TECL, SOXL, UPRO, SPXL, MSTR, COIN, MARA, RIOT, NVDA, AMD, PLTR, SMCI, TSLA, CVNA, APP, HOOD`
 
-It normally selects the strongest 7 symbols by 63 trading-day momentum, requires positive 63-day and 5-day symbol momentum, targets 1.8 gross exposure split equally, and rebalances every 7 trading days. If breadth20 is between 50% and 66%, it usually holds cash instead of opening the normal momentum basket; if SPY 20-day return is at least +3% in that mid-breadth regime, it opens a smaller 1.0 gross top-3 sleeve. In loss regimes it uses the tested defensive sleeves: SPY 20-day crash uses 5-day top 7; SPY 63-day drawdown -2% to -5%, weak breadth, and mild negative SPY20 use 63-day top 5.
+It normally selects the strongest 7 symbols by 63 trading-day momentum, requires positive 63-day and 5-day symbol momentum, targets 1.8 gross exposure split equally, and rebalances every 7 trading days. If breadth20 is between 50% and 66%, it usually holds cash instead of opening the normal momentum basket; if SPY 20-day return is at least +3% in that mid-breadth regime, it opens a 1.2 gross top-3 sleeve. In loss regimes it uses the tested defensive sleeves: SPY 20-day crash uses 5-day top 7; SPY 63-day drawdown -2% to -5%, weak breadth, and mild negative SPY20 use 63-day top 5.
 
 ## Paper Safety
 
