@@ -23,6 +23,7 @@ from src.utils.io_utils import ensure_dir, load_yaml_config, write_json
 
 DAILY_BUY_BLOCK_LOSS_PCT = 0.02
 MIN_DELTA_NOTIONAL = 25.0
+BUYING_POWER_BUFFER = 0.98
 MANAGED_ORDER_PREFIX = "gh-puremom"
 DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
 
@@ -185,6 +186,49 @@ def build_plan(
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
 
 
+def fit_buys_to_buying_power(
+    plans: list[PaperOrderPlan],
+    buying_power: float,
+) -> tuple[list[PaperOrderPlan], dict[str, Any]]:
+    buys = [plan for plan in plans if plan.side == "buy"]
+    buy_notional = sum(plan.notional for plan in buys)
+    available = max(0.0, buying_power * BUYING_POWER_BUFFER)
+    info = {
+        "applied": False,
+        "original_buy_notional": round(buy_notional, 2),
+        "available_buy_notional": round(available, 2),
+        "scale": 1.0,
+        "dropped_buy_symbols": [],
+    }
+    if buy_notional <= available or buy_notional <= 0.0:
+        return plans, info
+
+    scale = available / buy_notional if buy_notional > 0.0 else 0.0
+    info["applied"] = True
+    info["scale"] = round(scale, 6)
+    adjusted: list[PaperOrderPlan] = []
+    dropped: list[str] = []
+    for plan in plans:
+        if plan.side != "buy":
+            adjusted.append(plan)
+            continue
+        qty = int(math.floor(plan.qty * scale))
+        if qty < 1 or qty * plan.price < MIN_DELTA_NOTIONAL:
+            dropped.append(plan.symbol)
+            continue
+        adjusted.append(
+            PaperOrderPlan(
+                symbol=plan.symbol,
+                side=plan.side,
+                qty=qty,
+                price=plan.price,
+                target_qty=plan.target_qty,
+            )
+        )
+    info["dropped_buy_symbols"] = dropped
+    return adjusted, info
+
+
 def submit_plans(
     client: AlpacaPaperTradingClient,
     plans: list[PaperOrderPlan],
@@ -287,9 +331,8 @@ def main() -> None:
     if should_block_new_buys(account):
         plans = [plan for plan in plans if plan.side == "sell"]
 
+    plans, buying_power_adjustment = fit_buys_to_buying_power(plans, buying_power)
     buy_notional = sum(plan.notional for plan in plans if plan.side == "buy")
-    if buy_notional > buying_power and not any(plan.side == "sell" for plan in plans):
-        raise RuntimeError(f"Buying power check failed: need {buy_notional:.2f}, have {buying_power:.2f}")
 
     run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
     submitted = submit_plans(client, plans, args.execute, run_key)
@@ -322,6 +365,8 @@ def main() -> None:
         "trading_days_since_rebalance": trading_days_elapsed,
         "state_updated": state_updated,
         "buying_power": buying_power,
+        "buying_power_adjustment": buying_power_adjustment,
+        "planned_buy_notional": round(buy_notional, 2),
         "equity": equity,
         "orders": submitted,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
