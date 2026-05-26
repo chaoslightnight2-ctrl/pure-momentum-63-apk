@@ -50,6 +50,6 @@ Benchmark: SPY total return over the same period: `105.9%`.
 - Max drawdown improved materially but is still high at `-45.5%`.
 - Backtest max gross reached about `2.11` because mark-to-market drift can raise exposure between rebalances.
 - Paper runner caps target gross at `1.8` when sizing orders and keeps existing market-open, duplicate-order, buying-power, daily-loss, and paper-only controls.
-- Paper runner submits flatten orders first, waits for order completion, then submits new buys sequentially with buying-power checks before each order.
+- Paper runner submits flatten orders first, waits for order completion, then submits new buys in proportional rounds with buying-power checks before each order. This prevents the first symbols from consuming all buying power while later symbols are starved.
 - The strategy was discovered in-sample and still needs walk-forward parameter stability before any promotion beyond paper.
 

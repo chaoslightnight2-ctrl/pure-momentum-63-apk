@@ -358,6 +358,25 @@ def fit_buys_to_buying_power(
     return adjusted, info
 
 
+def split_buy_plans_into_rounds(plans: list[PaperOrderPlan], rounds: int) -> list[list[PaperOrderPlan]]:
+    rounds = max(1, rounds)
+    buys = [plan for plan in plans if plan.side == "buy"]
+    batches: list[list[PaperOrderPlan]] = []
+    allocated = {plan.symbol: 0 for plan in buys}
+    for round_idx in range(1, rounds + 1):
+        batch: list[PaperOrderPlan] = []
+        for plan in buys:
+            cumulative = int(math.floor(plan.qty * round_idx / rounds))
+            qty = cumulative - allocated[plan.symbol]
+            if qty < 1 or qty * plan.price < MIN_DELTA_NOTIONAL:
+                continue
+            allocated[plan.symbol] += qty
+            batch.append(plan.resized(qty))
+        if batch:
+            batches.append(batch)
+    return batches
+
+
 def buying_power_from_error(exc: requests.HTTPError) -> float | None:
     text = str(exc)
     match = re.search(r'"buying_power"\s*:\s*"([^"]+)"', text)
@@ -494,6 +513,41 @@ def submit_plans(
     return submitted
 
 
+def submit_rebalance_plans(
+    client: AlpacaPaperTradingClient,
+    plans: list[PaperOrderPlan],
+    execute: bool,
+    run_key: str,
+    wait_after_order_seconds: int,
+    buy_submission_rounds: int,
+) -> list[dict[str, Any]]:
+    submitted: list[dict[str, Any]] = []
+    sell_plans = [plan for plan in plans if plan.side == "sell"]
+    buy_plans = [plan for plan in plans if plan.side == "buy"]
+    if sell_plans:
+        submitted.extend(
+            submit_plans(
+                client,
+                sell_plans,
+                execute,
+                f"{run_key}-sell",
+                wait_after_order_seconds=wait_after_order_seconds,
+            )
+        )
+    for idx, batch in enumerate(split_buy_plans_into_rounds(buy_plans, buy_submission_rounds), start=1):
+        rows = submit_plans(
+            client,
+            batch,
+            execute,
+            f"{run_key}-b{idx}",
+            wait_after_order_seconds=wait_after_order_seconds,
+        )
+        for row in rows:
+            row["buy_round"] = idx
+        submitted.extend(rows)
+    return submitted
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/settings.yaml")
@@ -513,6 +567,7 @@ def main() -> None:
     sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     order_fill_wait_seconds = int(strategy_cfg.get("order_fill_wait_seconds", 45))
+    buy_submission_rounds = int(strategy_cfg.get("buy_submission_rounds", 10))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_cash_gross18"))
@@ -617,7 +672,14 @@ def main() -> None:
     buy_notional = sum(plan.notional for plan in plans if plan.side == "buy")
 
     run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
-    submitted = submit_plans(client, plans, args.execute, run_key, wait_after_order_seconds=order_fill_wait_seconds)
+    submitted = submit_rebalance_plans(
+        client,
+        plans,
+        args.execute,
+        run_key,
+        wait_after_order_seconds=order_fill_wait_seconds,
+        buy_submission_rounds=buy_submission_rounds,
+    )
     final_account = client.get_account() if args.execute else account
     final_positions = managed_positions(client.get_positions(), universe) if args.execute else current_qty
     final_open_orders = client.get_orders(status="open", nested=True) if args.execute else []
@@ -654,6 +716,7 @@ def main() -> None:
         "trading_days_since_rebalance": trading_days_elapsed,
         "state_updated": state_updated,
         "sell_all_before_rebalance": sell_all_before_rebalance,
+        "buy_submission_rounds": buy_submission_rounds,
         "flatten_orders": flatten_orders,
         "buying_power": buying_power,
         "buying_power_adjustment": buying_power_adjustment,
