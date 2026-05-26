@@ -29,6 +29,7 @@ BUYING_POWER_BUFFER = 0.98
 ORDER_BUYING_POWER_BUFFER = 0.85
 MANAGED_ORDER_PREFIX = "gh-puremom"
 DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
+OPEN_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "pending_replace", "pending_cancel"}
 
 
 @dataclass
@@ -390,11 +391,30 @@ def cap_buy_to_current_buying_power(
     return plan.resized(capped_qty), info
 
 
+def wait_for_order_done(
+    client: AlpacaPaperTradingClient,
+    order_id: str | None,
+    timeout_seconds: int,
+) -> dict[str, Any] | None:
+    if not order_id or timeout_seconds <= 0:
+        return None
+    deadline = time.monotonic() + timeout_seconds
+    last_order: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last_order = client.get_order(order_id)
+        status = str(last_order.get("status", "")).lower()
+        if status not in OPEN_ORDER_STATES:
+            return last_order
+        time.sleep(2.0)
+    return last_order
+
+
 def submit_plans(
     client: AlpacaPaperTradingClient,
     plans: list[PaperOrderPlan],
     execute: bool,
     run_key: str,
+    wait_after_order_seconds: int = 0,
 ) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
     for plan in plans:
@@ -433,6 +453,11 @@ def submit_plans(
                 result = client.submit_order(payload)
                 row["state"] = result.get("status", "submitted")
                 row["alpaca_order_id"] = result.get("id")
+                final_order = wait_for_order_done(client, row.get("alpaca_order_id"), wait_after_order_seconds)
+                if final_order:
+                    row["state"] = final_order.get("status", row["state"])
+                    row["filled_qty"] = final_order.get("filled_qty")
+                    row["filled_avg_price"] = final_order.get("filled_avg_price")
             except requests.HTTPError as exc:
                 buying_power = buying_power_from_error(exc)
                 retry_qty = int(math.floor((buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if buying_power else 0
@@ -456,6 +481,11 @@ def submit_plans(
                             },
                         }
                     )
+                    final_order = wait_for_order_done(client, row.get("alpaca_order_id"), wait_after_order_seconds)
+                    if final_order:
+                        row["state"] = final_order.get("status", row["state"])
+                        row["filled_qty"] = final_order.get("filled_qty")
+                        row["filled_avg_price"] = final_order.get("filled_avg_price")
                 else:
                     row["state"] = "rejected_insufficient_buying_power" if buying_power is not None else "rejected_order_error"
                     row["error"] = str(exc)
@@ -482,6 +512,7 @@ def main() -> None:
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
+    order_fill_wait_seconds = int(strategy_cfg.get("order_fill_wait_seconds", 45))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_cash_gross18"))
@@ -545,7 +576,13 @@ def main() -> None:
     if sell_all_before_rebalance and current_qty:
         flatten_plans = build_liquidation_plan(close, current_qty)
         run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
-        flatten_orders = submit_plans(client, flatten_plans, args.execute, f"{run_key}-flat")
+        flatten_orders = submit_plans(
+            client,
+            flatten_plans,
+            args.execute,
+            f"{run_key}-flat",
+            wait_after_order_seconds=order_fill_wait_seconds,
+        )
         remaining_positions, remaining_open_orders = wait_for_flatten(client, universe, flatten_wait_seconds) if args.execute else ({}, [])
         if remaining_positions or has_blocking_open_order(remaining_open_orders, universe):
             report = {
@@ -580,7 +617,10 @@ def main() -> None:
     buy_notional = sum(plan.notional for plan in plans if plan.side == "buy")
 
     run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
-    submitted = submit_plans(client, plans, args.execute, run_key)
+    submitted = submit_plans(client, plans, args.execute, run_key, wait_after_order_seconds=order_fill_wait_seconds)
+    final_account = client.get_account() if args.execute else account
+    final_positions = managed_positions(client.get_positions(), universe) if args.execute else current_qty
+    final_open_orders = client.get_orders(status="open", nested=True) if args.execute else []
     completed_signal_date = str(close.index[-1].date())
     state_updated = False
     if args.execute:
@@ -619,6 +659,10 @@ def main() -> None:
         "buying_power_adjustment": buying_power_adjustment,
         "planned_buy_notional": round(buy_notional, 2),
         "equity": equity,
+        "final_buying_power": float(final_account.get("buying_power") or 0.0),
+        "final_equity": float(final_account.get("equity") or 0.0),
+        "final_qty": final_positions,
+        "open_order_count_after_run": len(final_open_orders),
         "orders": submitted,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
     }

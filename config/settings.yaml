@@ -16,6 +16,7 @@ pure_momentum:
   rebalance_days: 7
   sell_all_before_rebalance: true
   flatten_wait_seconds: 60
+  order_fill_wait_seconds: 45
   target_gross_leverage: 1.8
   max_gross_leverage: 1.8
   min_momentum: 0.0

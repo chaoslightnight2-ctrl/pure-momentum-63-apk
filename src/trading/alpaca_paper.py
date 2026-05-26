@@ -94,6 +94,9 @@ class AlpacaPaperTradingClient:
     def get_orders(self, status: str = "open", nested: bool = True) -> list[dict[str, Any]]:
         return self._request("GET", "/v2/orders", params={"status": status, "nested": str(nested).lower()})
 
+    def get_order(self, order_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/v2/orders/{order_id}")
+
     def cancel_order(self, order_id: str) -> None:
         try:
             self._request("DELETE", f"/v2/orders/{order_id}")
