@@ -1,8 +1,12 @@
 {
-  "last_order_count": 0,
-  "last_rebalance_at_utc": null,
-  "last_rebalance_date": null,
-  "last_rebalance_reason": "initial_state",
-  "last_selected_symbols": [],
+  "last_order_count": 3,
+  "last_rebalance_at_utc": "2026-05-26T13:56:27.283430+00:00",
+  "last_rebalance_date": "2026-05-22",
+  "last_rebalance_reason": "forced",
+  "last_selected_symbols": [
+    "SOXL",
+    "AMD",
+    "TECL"
+  ],
   "strategy": "pure_momentum_lb63_top3_reb5"
 }
