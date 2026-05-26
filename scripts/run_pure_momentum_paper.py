@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,7 @@ from src.utils.io_utils import ensure_dir, load_yaml_config, write_json
 DAILY_BUY_BLOCK_LOSS_PCT = 0.02
 MIN_DELTA_NOTIONAL = 25.0
 BUYING_POWER_BUFFER = 0.98
+ORDER_BUYING_POWER_BUFFER = 0.85
 MANAGED_ORDER_PREFIX = "gh-puremom"
 DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
 
@@ -49,6 +52,15 @@ class PaperOrderPlan:
             "time_in_force": "day",
             "client_order_id": f"{MANAGED_ORDER_PREFIX}-{run_key}-{self.symbol.lower()}-{self.side}",
         }
+
+    def resized(self, qty: int) -> "PaperOrderPlan":
+        return PaperOrderPlan(
+            symbol=self.symbol,
+            side=self.side,
+            qty=qty,
+            price=self.price,
+            target_qty=self.target_qty,
+        )
 
 
 def latest_completed_daily_close(raw: pd.DataFrame) -> pd.DataFrame:
@@ -229,6 +241,39 @@ def fit_buys_to_buying_power(
     return adjusted, info
 
 
+def buying_power_from_error(exc: requests.HTTPError) -> float | None:
+    text = str(exc)
+    match = re.search(r'"buying_power"\s*:\s*"([^"]+)"', text)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def cap_buy_to_current_buying_power(
+    client: AlpacaPaperTradingClient,
+    plan: PaperOrderPlan,
+) -> tuple[PaperOrderPlan | None, dict[str, Any]]:
+    if plan.side != "buy":
+        return plan, {"applied": False}
+
+    account = client.get_account()
+    buying_power = float(account.get("buying_power") or 0.0)
+    affordable_qty = int(math.floor((buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if plan.price > 0 else 0
+    capped_qty = min(plan.qty, affordable_qty)
+    info = {
+        "applied": capped_qty < plan.qty,
+        "buying_power": round(buying_power, 2),
+        "original_qty": plan.qty,
+        "capped_qty": capped_qty,
+    }
+    if capped_qty < 1 or capped_qty * plan.price < MIN_DELTA_NOTIONAL:
+        return None, info
+    return plan.resized(capped_qty), info
+
+
 def submit_plans(
     client: AlpacaPaperTradingClient,
     plans: list[PaperOrderPlan],
@@ -237,19 +282,67 @@ def submit_plans(
 ) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
     for plan in plans:
+        cap_info: dict[str, Any] = {"applied": False}
+        if execute:
+            capped_plan, cap_info = cap_buy_to_current_buying_power(client, plan)
+            if capped_plan is None:
+                submitted.append(
+                    {
+                        "symbol": plan.symbol,
+                        "side": plan.side,
+                        "qty": plan.qty,
+                        "notional_estimate": round(plan.notional, 2),
+                        "target_qty": plan.target_qty,
+                        "state": "skipped_insufficient_buying_power",
+                        "buying_power_cap": cap_info,
+                    }
+                )
+                continue
+            plan = capped_plan
+
         payload = plan.payload(run_key)
         row = {
             "symbol": plan.symbol,
             "side": plan.side,
             "qty": plan.qty,
             "notional_estimate": round(plan.notional, 2),
+            "target_qty": plan.target_qty,
             "client_order_id": payload["client_order_id"],
             "state": "planned",
         }
+        if cap_info.get("applied"):
+            row["buying_power_cap"] = cap_info
         if execute:
-            result = client.submit_order(payload)
-            row["state"] = result.get("status", "submitted")
-            row["alpaca_order_id"] = result.get("id")
+            try:
+                result = client.submit_order(payload)
+                row["state"] = result.get("status", "submitted")
+                row["alpaca_order_id"] = result.get("id")
+            except requests.HTTPError as exc:
+                buying_power = buying_power_from_error(exc)
+                retry_qty = int(math.floor((buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if buying_power else 0
+                retry_qty = min(plan.qty - 1, retry_qty)
+                if plan.side == "buy" and retry_qty >= 1 and retry_qty * plan.price >= MIN_DELTA_NOTIONAL:
+                    retry_plan = plan.resized(retry_qty)
+                    retry_payload = retry_plan.payload(run_key)
+                    result = client.submit_order(retry_payload)
+                    row.update(
+                        {
+                            "qty": retry_plan.qty,
+                            "notional_estimate": round(retry_plan.notional, 2),
+                            "client_order_id": retry_payload["client_order_id"],
+                            "state": result.get("status", "submitted"),
+                            "alpaca_order_id": result.get("id"),
+                            "buying_power_retry": {
+                                "applied": True,
+                                "buying_power": buying_power,
+                                "original_qty": plan.qty,
+                                "retry_qty": retry_plan.qty,
+                            },
+                        }
+                    )
+                else:
+                    row["state"] = "rejected_insufficient_buying_power"
+                    row["error"] = str(exc)
             time.sleep(0.5)
         submitted.append(row)
     return submitted
