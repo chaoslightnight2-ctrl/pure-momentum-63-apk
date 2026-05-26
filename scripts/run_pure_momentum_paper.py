@@ -180,7 +180,7 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     if mid_low <= breadth20 < mid_high and mid_sleeve_gross is not None and spy20 >= mid_sleeve_spy20_min:
         return SelectionResult(
             rank_symbols(close, universe, lookback_days, mid_sleeve_top_n, min_momentum),
-            "normal_mid_breadth_spy20_top3_gross08",
+            "normal_mid_breadth_spy20_top3_gross10",
             breadth20,
             spy20,
             spy_dd63,
