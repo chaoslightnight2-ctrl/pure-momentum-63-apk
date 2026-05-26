@@ -147,6 +147,38 @@ def rank_symbols_composite_momentum(
     return [str(symbol) for symbol in scores.head(top_n).index]
 
 
+def rank_symbols_spydd_acceleration(
+    close: pd.DataFrame,
+    symbols: list[str],
+    top_n: int,
+    min_momentum_63d: float | None,
+    min_momentum_20d: float | None,
+    min_momentum_5d: float | None,
+) -> list[str]:
+    universe = [symbol for symbol in symbols if symbol in close.columns]
+    if len(close) <= 63 or not universe:
+        return []
+
+    latest = close[universe].iloc[-1]
+    mom63 = latest / close[universe].iloc[-64] - 1.0
+    mom20 = latest / close[universe].iloc[-21] - 1.0
+    mom5 = latest / close[universe].iloc[-6] - 1.0
+    score = mom20 - mom63
+    scores = (
+        pd.DataFrame({"score": score, "mom63": mom63, "mom20": mom20, "mom5": mom5})
+        .replace([float("inf"), float("-inf")], pd.NA)
+        .dropna()
+    )
+    if min_momentum_63d is not None:
+        scores = scores.loc[scores["mom63"] >= min_momentum_63d]
+    if min_momentum_20d is not None:
+        scores = scores.loc[scores["mom20"] >= min_momentum_20d]
+    if min_momentum_5d is not None:
+        scores = scores.loc[scores["mom5"] >= min_momentum_5d]
+    scores = scores.sort_values("score", ascending=False)
+    return [str(symbol) for symbol in scores.head(top_n).index]
+
+
 def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], universe: list[str]) -> SelectionResult:
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     top_n = int(strategy_cfg.get("top_n", 7))
@@ -164,6 +196,12 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     weak_breadth = float(strategy_cfg.get("weak_breadth_threshold", 0.33))
     weak_breadth_score = str(strategy_cfg.get("weak_breadth_score", "momentum_63")).lower()
     weak_breadth_score_weights = strategy_cfg.get("weak_breadth_score_weights", {})
+    spydd_score = str(strategy_cfg.get("spydd_score", "momentum_63")).lower()
+    spydd_top_n = int(strategy_cfg.get("spydd_top_n", 5))
+    spydd_min_mom20_raw = strategy_cfg.get("spydd_min_20d_momentum")
+    spydd_min_mom20 = None if spydd_min_mom20_raw is None else float(spydd_min_mom20_raw)
+    spydd_min_mom5_raw = strategy_cfg.get("spydd_min_5d_momentum")
+    spydd_min_mom5 = None if spydd_min_mom5_raw is None else float(spydd_min_mom5_raw)
     spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
 
     if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns:
@@ -183,6 +221,14 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
             spy_dd63,
         )
     if -0.05 <= spy_dd63 <= -0.02:
+        if spydd_score == "acceleration_20_minus_63":
+            return SelectionResult(
+                rank_symbols_spydd_acceleration(close, universe, spydd_top_n, min_momentum, spydd_min_mom20, spydd_min_mom5),
+                "loss_spy_dd_2_5_accel20_minus63_top2",
+                breadth20,
+                spy20,
+                spy_dd63,
+            )
         return SelectionResult(
             rank_symbols(close, universe, lookback_days, 5, min_momentum),
             "loss_spy_dd_2_5_lb63_top5",

@@ -19,7 +19,7 @@ This is research-only and paper-trading only. It is not a guarantee of profit an
   - if `50% <= breadth20 < 66%` and SPY 20-day return is at least `+2.5%`, open a 63-day top-3 sleeve at `1.3` gross
 - Loss-regime sleeves:
   - SPY 20-day return `< -5%`: 5-day top 7, momentum `>= 0`
-  - SPY 63-day drawdown `-2%` to `-5%`: 63-day top 5, momentum `>= 0`
+  - SPY 63-day drawdown `-2%` to `-5%`: top 2 by `20-day momentum - 63-day momentum`, with 63-day, 20-day, and 5-day momentum `>= 0`
   - breadth20 `< 33%`: top 5 by composite score `40% 63-day momentum + 40% 20-day momentum + 20% 5-day momentum`, with 63-day momentum `>= 0`
   - SPY 20-day return `-2%` to `0%`: 63-day top 5, momentum `>= 0`
 
@@ -46,6 +46,7 @@ After paper-trading buying-power checks, the Alpaca basket filled closer to `1.2
 | current mid-breadth cash, 1.2 gross | 88.61x | 2.45 | -32.3% | 3.01 | 511 | -16.6% | 0.95 | 1.24 |
 | mid-breadth SPY20 >= +2.5%, top3 sleeve at 1.3 gross | 225.49x | 2.83 | -32.3% | 3.53 | 526 | -16.6% | 1.00 | 1.31 |
 | weak-breadth composite 40/40/20, mid sleeve still 1.3 gross | 244.58x | 2.86 | -32.3% | 3.72 | 526 | -16.6% | 1.00 | 1.31 |
+| SPY DD accel top2, weak composite, mid sleeve still 1.3 gross | 322.52x | 3.13 | -24.3% | 5.46 | 454 | -13.2% | 0.92 | 1.31 |
 
 ## Stress Results
 

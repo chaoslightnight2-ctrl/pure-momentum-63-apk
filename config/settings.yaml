@@ -9,7 +9,7 @@ reports:
   directory: reports
 
 pure_momentum:
-  name: pure_momentum_mid_breadth_spy20_sleeve_weak_comp_gross18
+  name: pure_momentum_spydd_accel_weak_comp_gross18
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 7
@@ -29,6 +29,10 @@ pure_momentum:
   mid_breadth_sleeve_spy20_min: 0.025
   mid_breadth_sleeve_top_n: 3
   mid_breadth_sleeve_gross_leverage: 1.3
+  spydd_score: acceleration_20_minus_63
+  spydd_top_n: 2
+  spydd_min_20d_momentum: 0.0
+  spydd_min_5d_momentum: 0.0
   weak_breadth_threshold: 0.33
   weak_breadth_score: composite_63_20_5
   weak_breadth_score_weights:
