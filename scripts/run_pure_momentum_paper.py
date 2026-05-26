@@ -199,6 +199,36 @@ def build_plan(
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
 
 
+def build_liquidation_plan(close: pd.DataFrame, current_qty: dict[str, int]) -> list[PaperOrderPlan]:
+    plans: list[PaperOrderPlan] = []
+    for symbol in sorted(current_qty):
+        qty = current_qty[symbol]
+        price = float(close[symbol].iloc[-1]) if symbol in close.columns else 0.0
+        if price <= 0.0 or qty == 0:
+            continue
+        side = "sell" if qty > 0 else "buy"
+        order_qty = abs(int(qty))
+        if order_qty < 1 or order_qty * price < MIN_DELTA_NOTIONAL:
+            continue
+        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=order_qty, price=price, target_qty=0))
+    return plans
+
+
+def wait_for_flatten(
+    client: AlpacaPaperTradingClient,
+    universe: set[str],
+    timeout_seconds: int,
+) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    deadline = time.monotonic() + max(timeout_seconds, 0)
+    positions = managed_positions(client.get_positions(), universe)
+    open_orders = client.get_orders(status="open", nested=True)
+    while (positions or has_blocking_open_order(open_orders, universe)) and time.monotonic() < deadline:
+        time.sleep(2.0)
+        positions = managed_positions(client.get_positions(), universe)
+        open_orders = client.get_orders(status="open", nested=True)
+    return positions, open_orders
+
+
 def fit_buys_to_buying_power(
     plans: list[PaperOrderPlan],
     buying_power: float,
@@ -364,6 +394,8 @@ def main() -> None:
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     top_n = int(strategy_cfg.get("top_n", 3))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
+    sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
+    flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     min_momentum_raw = strategy_cfg.get("min_momentum")
@@ -421,6 +453,37 @@ def main() -> None:
 
     equity = float(account.get("equity") or 0.0)
     buying_power = float(account.get("buying_power") or 0.0)
+    flatten_orders: list[dict[str, Any]] = []
+    if sell_all_before_rebalance and current_qty:
+        flatten_plans = build_liquidation_plan(close, current_qty)
+        run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+        flatten_orders = submit_plans(client, flatten_plans, args.execute, f"{run_key}-flat")
+        remaining_positions, remaining_open_orders = wait_for_flatten(client, universe, flatten_wait_seconds) if args.execute else ({}, [])
+        if remaining_positions or has_blocking_open_order(remaining_open_orders, universe):
+            report = {
+                "status": "flatten_submitted_waiting_rebalance",
+                "execute": bool(args.execute),
+                "strategy": "pure_momentum_lb63_top3_reb5",
+                "selected_symbols": chosen,
+                "current_qty": current_qty,
+                "remaining_qty": remaining_positions,
+                "rebalance_due": due,
+                "rebalance_due_reason": due_reason,
+                "last_rebalance_date": state.get("last_rebalance_date"),
+                "trading_days_since_rebalance": trading_days_elapsed,
+                "sell_all_before_rebalance": sell_all_before_rebalance,
+                "flatten_orders": flatten_orders,
+                "message": "Flatten orders were submitted; buy rebalance will wait until managed positions and open orders clear.",
+                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
+            print(json.dumps(report, indent=2))
+            return
+        account = client.get_account()
+        equity = float(account.get("equity") or 0.0)
+        buying_power = float(account.get("buying_power") or 0.0)
+        current_qty = {}
+
     plans = build_plan(close, chosen, current_qty, equity, target_gross, max_gross)
     if should_block_new_buys(account):
         plans = [plan for plan in plans if plan.side == "sell"]
@@ -458,6 +521,8 @@ def main() -> None:
         "last_rebalance_date": state.get("last_rebalance_date"),
         "trading_days_since_rebalance": trading_days_elapsed,
         "state_updated": state_updated,
+        "sell_all_before_rebalance": sell_all_before_rebalance,
+        "flatten_orders": flatten_orders,
         "buying_power": buying_power,
         "buying_power_adjustment": buying_power_adjustment,
         "planned_buy_notional": round(buy_notional, 2),

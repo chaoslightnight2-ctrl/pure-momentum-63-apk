@@ -13,6 +13,8 @@ pure_momentum:
   lookback_days: 63
   top_n: 3
   rebalance_days: 5
+  sell_all_before_rebalance: true
+  flatten_wait_seconds: 60
   target_gross_leverage: 2.0
   max_gross_leverage: 2.0
   min_momentum:
