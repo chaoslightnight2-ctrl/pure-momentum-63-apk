@@ -631,27 +631,37 @@ def submit_plans(
                 if plan.side == "buy" and retry_qty >= 1 and retry_qty * plan.price >= MIN_DELTA_NOTIONAL:
                     retry_plan = plan.resized(retry_qty)
                     retry_payload = retry_plan.payload(run_key)
-                    result = client.submit_order(retry_payload)
-                    row.update(
-                        {
-                            "qty": retry_plan.qty,
-                            "notional_estimate": round(retry_plan.notional, 2),
-                            "client_order_id": retry_payload["client_order_id"],
-                            "state": result.get("status", "submitted"),
-                            "alpaca_order_id": result.get("id"),
-                            "buying_power_retry": {
-                                "applied": True,
-                                "buying_power": buying_power,
-                                "original_qty": plan.qty,
-                                "retry_qty": retry_plan.qty,
-                            },
+                    try:
+                        result = client.submit_order(retry_payload)
+                        row.update(
+                            {
+                                "qty": retry_plan.qty,
+                                "notional_estimate": round(retry_plan.notional, 2),
+                                "client_order_id": retry_payload["client_order_id"],
+                                "state": result.get("status", "submitted"),
+                                "alpaca_order_id": result.get("id"),
+                                "buying_power_retry": {
+                                    "applied": True,
+                                    "buying_power": buying_power,
+                                    "original_qty": plan.qty,
+                                    "retry_qty": retry_plan.qty,
+                                },
+                            }
+                        )
+                        final_order = wait_for_order_done(client, row.get("alpaca_order_id"), wait_after_order_seconds)
+                        if final_order:
+                            row["state"] = final_order.get("status", row["state"])
+                            row["filled_qty"] = final_order.get("filled_qty")
+                            row["filled_avg_price"] = final_order.get("filled_avg_price")
+                    except requests.HTTPError as retry_exc:
+                        row["state"] = "rejected_insufficient_buying_power"
+                        row["buying_power_retry"] = {
+                            "applied": True,
+                            "buying_power": buying_power,
+                            "original_qty": plan.qty,
+                            "retry_qty": retry_plan.qty,
                         }
-                    )
-                    final_order = wait_for_order_done(client, row.get("alpaca_order_id"), wait_after_order_seconds)
-                    if final_order:
-                        row["state"] = final_order.get("status", row["state"])
-                        row["filled_qty"] = final_order.get("filled_qty")
-                        row["filled_avg_price"] = final_order.get("filled_avg_price")
+                        row["error"] = str(retry_exc)
                 else:
                     row["state"] = "rejected_insufficient_buying_power" if buying_power is not None else "rejected_order_error"
                     row["error"] = str(exc)
