@@ -39,21 +39,28 @@ class PaperOrderPlan:
     qty: int
     price: float
     target_qty: int
+    notional_amount: float | None = None
 
     @property
     def notional(self) -> float:
+        if self.notional_amount is not None:
+            return float(self.notional_amount)
         return float(self.qty * self.price)
 
     def payload(self, run_key: str) -> dict[str, Any]:
         suffix = f"{int(time.time() * 1000)}"
-        return {
+        payload = {
             "symbol": self.symbol,
-            "qty": str(self.qty),
             "side": self.side,
             "type": "market",
             "time_in_force": "day",
             "client_order_id": f"{MANAGED_ORDER_PREFIX}-{run_key}-{self.symbol.lower()}-{self.side}-{suffix}",
         }
+        if self.notional_amount is not None:
+            payload["notional"] = f"{self.notional_amount:.2f}"
+        else:
+            payload["qty"] = str(self.qty)
+        return payload
 
     def resized(self, qty: int) -> "PaperOrderPlan":
         return PaperOrderPlan(
@@ -62,6 +69,16 @@ class PaperOrderPlan:
             qty=qty,
             price=self.price,
             target_qty=self.target_qty,
+        )
+
+    def resized_notional(self, notional_amount: float) -> "PaperOrderPlan":
+        return PaperOrderPlan(
+            symbol=self.symbol,
+            side=self.side,
+            qty=0,
+            price=self.price,
+            target_qty=self.target_qty,
+            notional_amount=notional_amount,
         )
 
 
@@ -552,7 +569,12 @@ def cap_buy_to_current_buying_power(
         "original_qty": plan.qty,
         "capped_qty": capped_qty,
     }
+    notional_cap = effective_buying_power * ORDER_BUYING_POWER_BUFFER
     if capped_qty < 1 or capped_qty * plan.price < MIN_DELTA_NOTIONAL:
+        fractional_notional = min(plan.notional, notional_cap)
+        if fractional_notional >= MIN_DELTA_NOTIONAL:
+            info["fractional_notional"] = round(fractional_notional, 2)
+            return plan.resized_notional(fractional_notional), info
         return None, info
     return plan.resized(capped_qty), info
 
@@ -626,7 +648,8 @@ def submit_plans(
                     row["filled_avg_price"] = final_order.get("filled_avg_price")
             except requests.HTTPError as exc:
                 buying_power = buying_power_from_error(exc)
-                retry_qty = int(math.floor((buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if buying_power else 0
+                retry_notional = buying_power * ORDER_BUYING_POWER_BUFFER if buying_power else 0.0
+                retry_qty = int(math.floor(retry_notional / plan.price)) if buying_power else 0
                 retry_qty = min(plan.qty - 1, retry_qty)
                 if plan.side == "buy" and retry_qty >= 1 and retry_qty * plan.price >= MIN_DELTA_NOTIONAL:
                     retry_plan = plan.resized(retry_qty)
@@ -660,6 +683,40 @@ def submit_plans(
                             "buying_power": buying_power,
                             "original_qty": plan.qty,
                             "retry_qty": retry_plan.qty,
+                        }
+                        row["error"] = str(retry_exc)
+                elif plan.side == "buy" and retry_notional >= MIN_DELTA_NOTIONAL:
+                    retry_plan = plan.resized_notional(min(plan.notional, retry_notional))
+                    retry_payload = retry_plan.payload(run_key)
+                    try:
+                        result = client.submit_order(retry_payload)
+                        row.update(
+                            {
+                                "qty": retry_plan.qty,
+                                "notional_estimate": round(retry_plan.notional, 2),
+                                "client_order_id": retry_payload["client_order_id"],
+                                "state": result.get("status", "submitted"),
+                                "alpaca_order_id": result.get("id"),
+                                "buying_power_retry": {
+                                    "applied": True,
+                                    "buying_power": buying_power,
+                                    "original_qty": plan.qty,
+                                    "retry_notional": retry_plan.notional,
+                                },
+                            }
+                        )
+                        final_order = wait_for_order_done(client, row.get("alpaca_order_id"), wait_after_order_seconds)
+                        if final_order:
+                            row["state"] = final_order.get("status", row["state"])
+                            row["filled_qty"] = final_order.get("filled_qty")
+                            row["filled_avg_price"] = final_order.get("filled_avg_price")
+                    except requests.HTTPError as retry_exc:
+                        row["state"] = "rejected_insufficient_buying_power"
+                        row["buying_power_retry"] = {
+                            "applied": True,
+                            "buying_power": buying_power,
+                            "original_qty": plan.qty,
+                            "retry_notional": retry_plan.notional,
                         }
                         row["error"] = str(retry_exc)
                 else:
