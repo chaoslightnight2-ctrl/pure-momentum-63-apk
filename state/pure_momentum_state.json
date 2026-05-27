@@ -1,16 +1,12 @@
 {
-  "last_order_count": 70,
-  "last_rebalance_at_utc": "2026-05-26T18:42:40.185845+00:00",
-  "last_rebalance_date": "2026-05-22",
+  "last_order_count": 0,
+  "last_rebalance_at_utc": "2026-05-27T15:21:15.722587+00:00",
+  "last_rebalance_date": "2026-05-26",
   "last_rebalance_reason": "forced",
   "last_selected_symbols": [
     "SOXL",
     "AMD",
-    "TECL",
-    "MARA",
-    "TQQQ",
-    "RIOT",
-    "SPXL"
+    "TECL"
   ],
-  "strategy": "pure_momentum_mid_breadth_cash_gross18"
+  "strategy": "pure_momentum_spydd_accel_weak_comp_above20ma_gross18"
 }
