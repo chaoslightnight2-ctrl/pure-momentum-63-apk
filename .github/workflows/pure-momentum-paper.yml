@@ -7,6 +7,10 @@ on:
         description: "Force rebalance even if the 7-trading-day gate is not due"
         required: false
         default: "false"
+      ignore_phase_lock:
+        description: "Emergency override for rebalance phase lock"
+        required: false
+        default: "false"
   schedule:
     # Weekdays once after the regular US market open. The bot still checks
     # Alpaca market-open status and only rebalances after 7 trading days.
@@ -53,6 +57,9 @@ jobs:
           EXTRA_ARGS=""
           if [ "${{ github.event.inputs.force_rebalance }}" = "true" ]; then
             EXTRA_ARGS="--force-rebalance"
+          fi
+          if [ "${{ github.event.inputs.ignore_phase_lock }}" = "true" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --ignore-phase-lock"
           fi
           python scripts/run_pure_momentum_paper.py --config config/settings.yaml --state-path state/pure_momentum_state.json --execute $EXTRA_ARGS
 

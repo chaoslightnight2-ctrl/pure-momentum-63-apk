@@ -13,7 +13,7 @@ This is research-only and paper-trading only. It is not a guarantee of profit an
   - require 5-day symbol momentum `>= 0`
   - select top 7
   - target gross exposure: `1.8`
-  - rebalance every 7 trading days
+  - rebalance every 7 trading days, with paper-runner phase lock enabled to avoid drifting into a different 7-day rebalance phase
 - Mid-breadth mode:
   - if `50% <= breadth20 < 66%`, usually hold cash instead of the normal momentum basket
   - if `50% <= breadth20 < 66%` and SPY 20-day return is at least `+2.5%`, open a 63-day top-3 sleeve at `1.3` gross

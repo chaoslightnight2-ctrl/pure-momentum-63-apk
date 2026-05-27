@@ -318,6 +318,27 @@ def is_rebalance_due(
     return False, "rebalance_interval_wait", days_since
 
 
+def rebalance_phase_status(
+    state: dict[str, Any],
+    trading_days_elapsed: int | None,
+    rebalance_days: int,
+    phase_lock_enabled: bool,
+) -> dict[str, Any]:
+    if not phase_lock_enabled:
+        return {"enabled": False, "aligned": True, "phase_offset": None}
+    if trading_days_elapsed is None:
+        return {"enabled": True, "aligned": False, "phase_offset": None}
+    interval = max(rebalance_days, 1)
+    phase_offset = int(trading_days_elapsed % interval)
+    return {
+        "enabled": True,
+        "aligned": phase_offset == 0,
+        "phase_offset": phase_offset,
+        "anchor_date": state.get("last_rebalance_date"),
+        "interval_days": interval,
+    }
+
+
 def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> dict[str, int]:
     out: dict[str, int] = {}
     for position in positions:
@@ -651,6 +672,7 @@ def main() -> None:
     parser.add_argument("--state-path", default=DEFAULT_STATE_PATH)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--force-rebalance", action="store_true")
+    parser.add_argument("--ignore-phase-lock", action="store_true")
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
@@ -661,6 +683,7 @@ def main() -> None:
     universe = set(symbols)
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
+    rebalance_phase_lock = bool(strategy_cfg.get("rebalance_phase_lock", False))
     sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     order_fill_wait_seconds = int(strategy_cfg.get("order_fill_wait_seconds", 45))
@@ -691,6 +714,7 @@ def main() -> None:
     due = args.force_rebalance or due
     if args.force_rebalance:
         due_reason = "forced"
+    phase_status = rebalance_phase_status(state, trading_days_elapsed, rebalance_days, rebalance_phase_lock)
     open_orders = client.get_orders(status="open", nested=True)
 
     if has_blocking_open_order(open_orders, universe):
@@ -701,7 +725,25 @@ def main() -> None:
             "selection_mode": selection.mode,
             "last_rebalance_date": state.get("last_rebalance_date"),
             "trading_days_since_rebalance": trading_days_elapsed,
+            "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+        }
+        write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
+        print(json.dumps(report, indent=2))
+        return
+
+    if due and phase_status["enabled"] and not phase_status["aligned"] and not args.ignore_phase_lock:
+        report = {
+            "status": "blocked_phase_lock",
+            "message": "Rebalance phase lock is enabled; no paper orders submitted outside the locked 7-trading-day phase.",
+            "selected_symbols": chosen,
+            "selection_mode": selection.mode,
+            "current_qty": current_qty,
+            "last_rebalance_date": state.get("last_rebalance_date"),
+            "trading_days_since_rebalance": trading_days_elapsed,
+            "rebalance_phase": phase_status,
+            "rebalance_due_reason": due_reason,
+            "force_rebalance": bool(args.force_rebalance),
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -716,6 +758,7 @@ def main() -> None:
             "current_qty": current_qty,
             "last_rebalance_date": state.get("last_rebalance_date"),
             "trading_days_since_rebalance": trading_days_elapsed,
+            "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -748,6 +791,7 @@ def main() -> None:
                 "rebalance_due_reason": due_reason,
                 "last_rebalance_date": state.get("last_rebalance_date"),
                 "trading_days_since_rebalance": trading_days_elapsed,
+                "rebalance_phase": phase_status,
                 "sell_all_before_rebalance": sell_all_before_rebalance,
                 "flatten_orders": flatten_orders,
                 "message": "Flatten orders were submitted; buy rebalance will wait until managed positions and open orders clear.",
@@ -814,6 +858,7 @@ def main() -> None:
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
         "trading_days_since_rebalance": trading_days_elapsed,
+        "rebalance_phase": phase_status,
         "state_updated": state_updated,
         "sell_all_before_rebalance": sell_all_before_rebalance,
         "buy_submission_rounds": buy_submission_rounds,
