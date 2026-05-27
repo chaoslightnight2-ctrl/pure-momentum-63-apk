@@ -546,6 +546,7 @@ def buying_power_from_error(exc: requests.HTTPError) -> float | None:
 def cap_buy_to_current_buying_power(
     client: AlpacaPaperTradingClient,
     plan: PaperOrderPlan,
+    remaining_buy_count: int = 1,
 ) -> tuple[PaperOrderPlan | None, dict[str, Any]]:
     if plan.side != "buy":
         return plan, {"applied": False}
@@ -559,7 +560,9 @@ def cap_buy_to_current_buying_power(
         else buying_power
     )
     effective_buying_power = min(buying_power, daytrading_buying_power)
-    affordable_qty = int(math.floor((effective_buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if plan.price > 0 else 0
+    remaining_buy_count = max(1, remaining_buy_count)
+    notional_cap = (effective_buying_power * ORDER_BUYING_POWER_BUFFER) / remaining_buy_count
+    affordable_qty = int(math.floor(notional_cap / plan.price)) if plan.price > 0 else 0
     capped_qty = min(plan.qty, affordable_qty)
     info = {
         "applied": capped_qty < plan.qty,
@@ -569,7 +572,6 @@ def cap_buy_to_current_buying_power(
         "original_qty": plan.qty,
         "capped_qty": capped_qty,
     }
-    notional_cap = effective_buying_power * ORDER_BUYING_POWER_BUFFER
     if capped_qty < 1 or capped_qty * plan.price < MIN_DELTA_NOTIONAL:
         fractional_notional = min(plan.notional, notional_cap)
         if fractional_notional >= MIN_DELTA_NOTIONAL:
@@ -605,10 +607,11 @@ def submit_plans(
     wait_after_order_seconds: int = 0,
 ) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
-    for plan in plans:
+    for plan_idx, plan in enumerate(plans):
         cap_info: dict[str, Any] = {"applied": False}
         if execute:
-            capped_plan, cap_info = cap_buy_to_current_buying_power(client, plan)
+            remaining_buy_count = sum(1 for item in plans[plan_idx:] if item.side == "buy")
+            capped_plan, cap_info = cap_buy_to_current_buying_power(client, plan, remaining_buy_count)
             if capped_plan is None:
                 submitted.append(
                     {
