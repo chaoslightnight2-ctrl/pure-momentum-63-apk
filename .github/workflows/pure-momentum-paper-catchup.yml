@@ -2,10 +2,6 @@ name: Pure Momentum Paper Catch-up Buys
 
 on:
   workflow_dispatch:
-  schedule:
-    # Weekdays during the regular US session. The runner still checks
-    # Alpaca market-open status before any paper order is submitted.
-    - cron: "*/30 13-20 * * 1-5"
 
 permissions:
   contents: read
