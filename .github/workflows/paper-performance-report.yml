@@ -1,0 +1,52 @@
+name: Paper Performance Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      after:
+        description: "Start date for read-only Alpaca paper report"
+        required: false
+        default: "2026-05-11"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Europe/Istanbul
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile report script
+        run: |
+          python -m py_compile scripts/report_paper_performance.py
+
+      - name: Build read-only paper report
+        run: |
+          python scripts/report_paper_performance.py --after "${{ github.event.inputs.after }}"
+
+      - name: Upload paper report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-performance-report
+          path: reports/paper_performance_since_2026-05-11.json
+          if-no-files-found: error
