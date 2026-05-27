@@ -15,6 +15,7 @@ pure_momentum:
   top_n: 7
   rebalance_days: 7
   rebalance_phase_lock: true
+  rebalance_phase_anchor_date: "2026-05-22"
   sell_all_before_rebalance: true
   flatten_wait_seconds: 60
   order_fill_wait_seconds: 45

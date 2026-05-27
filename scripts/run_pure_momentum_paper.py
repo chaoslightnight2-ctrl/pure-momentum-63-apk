@@ -338,6 +338,7 @@ def rebalance_phase_status(
     trading_days_elapsed: int | None,
     rebalance_days: int,
     phase_lock_enabled: bool,
+    phase_anchor_date: str | None = None,
 ) -> dict[str, Any]:
     if not phase_lock_enabled:
         return {"enabled": False, "aligned": True, "phase_offset": None}
@@ -349,7 +350,7 @@ def rebalance_phase_status(
         "enabled": True,
         "aligned": phase_offset == 0,
         "phase_offset": phase_offset,
-        "anchor_date": state.get("last_rebalance_date"),
+        "anchor_date": phase_anchor_date or state.get("last_rebalance_date"),
         "interval_days": interval,
     }
 
@@ -699,6 +700,8 @@ def main() -> None:
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     rebalance_phase_lock = bool(strategy_cfg.get("rebalance_phase_lock", False))
+    rebalance_phase_anchor_date = strategy_cfg.get("rebalance_phase_anchor_date")
+    rebalance_phase_anchor_date = str(rebalance_phase_anchor_date) if rebalance_phase_anchor_date else None
     sell_all_before_rebalance = bool(strategy_cfg.get("sell_all_before_rebalance", False))
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     order_fill_wait_seconds = int(strategy_cfg.get("order_fill_wait_seconds", 45))
@@ -726,10 +729,31 @@ def main() -> None:
     positions = client.get_positions()
     current_qty = managed_positions(positions, universe)
     due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
+    phase_days_elapsed = (
+        trading_days_since(close, rebalance_phase_anchor_date)
+        if rebalance_phase_anchor_date
+        else trading_days_elapsed
+    )
+    phase_status = rebalance_phase_status(
+        state,
+        phase_days_elapsed,
+        rebalance_days,
+        rebalance_phase_lock,
+        rebalance_phase_anchor_date,
+    )
+    completed_signal_date = close.index[-1].date().isoformat()
+    if (
+        not args.force_rebalance
+        and rebalance_phase_anchor_date
+        and phase_status["enabled"]
+        and phase_status["aligned"]
+        and state.get("last_rebalance_date") != completed_signal_date
+    ):
+        due = True
+        due_reason = "phase_anchor_due"
     due = args.force_rebalance or due
     if args.force_rebalance:
         due_reason = "forced"
-    phase_status = rebalance_phase_status(state, trading_days_elapsed, rebalance_days, rebalance_phase_lock)
     open_orders = client.get_orders(status="open", nested=True)
 
     if has_blocking_open_order(open_orders, universe):
