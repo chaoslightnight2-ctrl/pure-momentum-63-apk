@@ -91,6 +91,7 @@ class SelectionResult:
     spy20: float | None
     spy_dd63: float | None
     target_gross_override: float | None = None
+    target_weights: dict[str, float] | None = None
 
 
 def latest_completed_daily_close(raw: pd.DataFrame) -> pd.DataFrame:
@@ -207,6 +208,46 @@ def rank_symbols_spydd_acceleration(
     return [str(symbol) for symbol in scores.head(top_n).index]
 
 
+def capped_symbol_weights(selected: list[str], caps: dict[str, float]) -> dict[str, float]:
+    if not selected:
+        return {}
+    weights = {symbol: 1.0 / len(selected) for symbol in selected}
+    for _ in range(10):
+        over = {symbol: weight for symbol, weight in weights.items() if weight > caps.get(symbol, 1.0)}
+        if not over:
+            break
+        excess = 0.0
+        for symbol, weight in over.items():
+            cap = caps.get(symbol, 1.0)
+            excess += weight - cap
+            weights[symbol] = cap
+        free = [symbol for symbol in selected if symbol not in over]
+        free_weight = sum(weights[symbol] for symbol in free)
+        if not free or excess <= 0.0 or free_weight <= 0.0:
+            break
+        for symbol in free:
+            weights[symbol] += excess * weights[symbol] / free_weight
+    total = sum(weights.values())
+    if total <= 0.0:
+        return {symbol: 1.0 / len(selected) for symbol in selected}
+    return {symbol: weight / total for symbol, weight in weights.items()}
+
+
+def selection_result(
+    symbols: list[str],
+    mode: str,
+    breadth20: float | None,
+    spy20: float | None,
+    spy_dd63: float | None,
+    strategy_cfg: dict[str, Any],
+    target_gross_override: float | None = None,
+) -> SelectionResult:
+    caps_cfg = strategy_cfg.get("symbol_weight_caps", {}) or {}
+    caps = {str(symbol).upper(): float(cap) for symbol, cap in caps_cfg.items()}
+    weights = capped_symbol_weights(symbols, caps) if caps else None
+    return SelectionResult(symbols, mode, breadth20, spy20, spy_dd63, target_gross_override, weights)
+
+
 def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], universe: list[str]) -> SelectionResult:
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     top_n = int(strategy_cfg.get("top_n", 7))
@@ -238,7 +279,7 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
 
     if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns:
-        return SelectionResult([], "insufficient_regime_data", None, None, None)
+        return selection_result([], "insufficient_regime_data", None, None, None, strategy_cfg)
 
     breadth20 = float(((close[universe].iloc[-1] / close[universe].iloc[-breadth_lookback - 1] - 1.0) > 0.0).mean())
     spy = close[spy_symbol]
@@ -246,70 +287,78 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     spy_dd63 = float(spy.iloc[-1] / spy.iloc[-63:].max() - 1.0)
 
     if spy20 < -0.05:
-        return SelectionResult(
+        return selection_result(
             rank_symbols(close, universe, 5, 7, min_momentum),
             "loss_spy20_crash_lb5_top7",
             breadth20,
             spy20,
             spy_dd63,
+            strategy_cfg,
         )
     if -0.05 <= spy_dd63 <= -0.02:
         if spydd_score == "acceleration_20_minus_63":
-            return SelectionResult(
+            return selection_result(
                 rank_symbols_spydd_acceleration(close, universe, spydd_top_n, min_momentum, spydd_min_mom20, spydd_min_mom5),
                 "loss_spy_dd_2_5_accel20_minus63_top2",
                 breadth20,
                 spy20,
                 spy_dd63,
+                strategy_cfg,
             )
-        return SelectionResult(
+        return selection_result(
             rank_symbols(close, universe, lookback_days, 5, min_momentum),
             "loss_spy_dd_2_5_lb63_top5",
             breadth20,
             spy20,
             spy_dd63,
+            strategy_cfg,
         )
     if breadth20 < weak_breadth:
         if weak_breadth_score == "composite_63_20_5":
-            return SelectionResult(
+            return selection_result(
                 rank_symbols_composite_momentum(close, universe, 5, min_momentum, weak_breadth_score_weights),
                 "loss_weak_breadth_comp_40_40_20_top5",
                 breadth20,
                 spy20,
                 spy_dd63,
+                strategy_cfg,
             )
-        return SelectionResult(
+        return selection_result(
             rank_symbols(close, universe, lookback_days, 5, min_momentum),
             "loss_weak_breadth_lb63_top5",
             breadth20,
             spy20,
             spy_dd63,
+            strategy_cfg,
         )
     if -0.02 <= spy20 < 0.0:
-        return SelectionResult(
+        return selection_result(
             rank_symbols(close, universe, lookback_days, 5, min_momentum),
             "loss_spy20_mild_neg_lb63_top5",
             breadth20,
             spy20,
             spy_dd63,
+            strategy_cfg,
         )
     if mid_low <= breadth20 < mid_high and mid_sleeve_gross is not None and spy20 >= mid_sleeve_spy20_min:
-        return SelectionResult(
+        return selection_result(
             rank_symbols(close, universe, lookback_days, mid_sleeve_top_n, min_momentum),
             "normal_mid_breadth_spy20_top3_gross13",
             breadth20,
             spy20,
             spy_dd63,
+            strategy_cfg,
             mid_sleeve_gross,
         )
     if mid_low <= breadth20 < mid_high:
-        return SelectionResult([], "normal_mid_breadth_cash", breadth20, spy20, spy_dd63)
-    return SelectionResult(
+        return selection_result([], "normal_mid_breadth_cash", breadth20, spy20, spy_dd63, strategy_cfg)
+    return selection_result(
         rank_symbols(close, universe, lookback_days, top_n, min_momentum, min_short_momentum, normal_above_ma_days),
         "normal_lb63_top7_mom5_pos_above20ma" if normal_above_ma_days == 20 else "normal_lb63_top7_mom5_pos",
         breadth20,
         spy20,
         spy_dd63,
+        strategy_cfg,
     )
 
 
@@ -373,6 +422,36 @@ def rebalance_phase_status(
     }
 
 
+def latest_completed_phase_date(
+    close: pd.DataFrame,
+    phase_anchor_date: str | None,
+    rebalance_days: int,
+    phase_offset: int,
+) -> str | None:
+    if not phase_anchor_date:
+        return None
+    anchor = pd.Timestamp(phase_anchor_date).tz_localize(None).normalize()
+    completed = close.index.normalize()
+    eligible = completed[completed >= anchor]
+    if len(eligible) == 0:
+        return None
+    interval = max(rebalance_days, 1)
+    anchor_index = int((completed < anchor).sum())
+    for date in reversed(eligible):
+        date_index = int((completed <= date).sum() - 1)
+        elapsed = date_index - anchor_index
+        if elapsed >= 0 and elapsed % interval == phase_offset:
+            return date.date().isoformat()
+    return None
+
+
+def close_through_date(close: pd.DataFrame, date_str: str | None) -> pd.DataFrame:
+    if not date_str:
+        return close
+    date = pd.Timestamp(date_str).tz_localize(None).normalize()
+    return close.loc[close.index.normalize() <= date]
+
+
 def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> dict[str, int]:
     out: dict[str, int] = {}
     for position in positions:
@@ -408,12 +487,15 @@ def build_plan(
     equity: float,
     target_gross: float,
     max_gross: float,
+    target_weights: dict[str, float] | None = None,
 ) -> list[PaperOrderPlan]:
     target_gross = min(target_gross, max_gross)
-    target_weight = target_gross / len(selected) if selected else 0.0
+    if target_weights is None:
+        target_weights = {symbol: 1.0 / len(selected) for symbol in selected} if selected else {}
     target_qty: dict[str, int] = {}
     for symbol in selected:
         price = float(close[symbol].iloc[-1])
+        target_weight = target_gross * float(target_weights.get(symbol, 0.0))
         target_qty[symbol] = int(math.floor((equity * target_weight) / price)) if price > 0 else 0
 
     plans: list[PaperOrderPlan] = []
@@ -435,6 +517,118 @@ def build_plan(
             continue
         plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
+
+
+def build_plan_from_target_exposures(
+    close: pd.DataFrame,
+    target_exposures: dict[str, float],
+    current_qty: dict[str, int],
+    equity: float,
+    max_gross: float,
+) -> list[PaperOrderPlan]:
+    total_gross = sum(max(0.0, float(weight)) for weight in target_exposures.values())
+    scale = min(1.0, max_gross / total_gross) if total_gross > max_gross and total_gross > 0.0 else 1.0
+    target_qty: dict[str, int] = {}
+    for symbol, exposure in target_exposures.items():
+        if symbol not in close.columns:
+            continue
+        price = float(close[symbol].iloc[-1])
+        target_qty[symbol] = int(math.floor((equity * float(exposure) * scale) / price)) if price > 0 else 0
+
+    plans: list[PaperOrderPlan] = []
+    all_symbols = sorted(set(current_qty) | set(target_qty))
+    for symbol in all_symbols:
+        price = float(close[symbol].iloc[-1]) if symbol in close.columns else 0.0
+        if price <= 0.0:
+            continue
+        desired = target_qty.get(symbol, 0)
+        current = current_qty.get(symbol, 0)
+        delta = desired - current
+        if abs(delta) < 1:
+            continue
+        side = "buy" if delta > 0 else "sell"
+        qty = abs(int(delta))
+        if side == "sell":
+            qty = min(qty, max(current, 0))
+        if qty < 1 or qty * price < MIN_DELTA_NOTIONAL:
+            continue
+        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
+    return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
+
+
+def combined_phase_sleeve_targets(
+    close: pd.DataFrame,
+    strategy_cfg: dict[str, Any],
+    symbols: list[str],
+    state: dict[str, Any],
+    phase_anchor_date: str | None,
+    rebalance_days: int,
+    target_gross: float,
+    current_phase_offset: int | None,
+    force_rebalance: bool,
+) -> tuple[dict[str, float], list[str], list[dict[str, Any]], bool]:
+    sleeves_cfg = strategy_cfg.get("phase_sleeves") or []
+    if not sleeves_cfg:
+        return {}, [], [], False
+
+    sleeve_state = dict(state.get("phase_sleeves", {}))
+    target_exposures: dict[str, float] = {}
+    selected_all: list[str] = []
+    reports: list[dict[str, Any]] = []
+    updated = False
+
+    for raw_sleeve in sleeves_cfg:
+        name = str(raw_sleeve.get("name", f"phase_{raw_sleeve.get('phase_offset', 0)}"))
+        allocation = float(raw_sleeve.get("allocation", 0.0))
+        phase_offset = int(raw_sleeve.get("phase_offset", 0))
+        latest_phase_date = latest_completed_phase_date(close, phase_anchor_date, rebalance_days, phase_offset)
+        stored = dict(sleeve_state.get(name, {}))
+        missing_state = not stored.get("last_rebalance_date")
+        is_due = force_rebalance or missing_state or stored.get("last_rebalance_date") != latest_phase_date
+        if current_phase_offset is not None and not force_rebalance:
+            is_due = is_due and (missing_state or current_phase_offset == phase_offset)
+        if is_due and latest_phase_date:
+            sleeve_close = close_through_date(close, latest_phase_date)
+            selection = select_strategy_symbols(sleeve_close, strategy_cfg, symbols)
+            stored = {
+                "last_rebalance_date": latest_phase_date,
+                "selected_symbols": selection.symbols,
+                "selection_mode": selection.mode,
+                "target_gross_override": selection.target_gross_override,
+                "target_weights": selection.target_weights,
+                "breadth20": selection.breadth20,
+                "spy20": selection.spy20,
+                "spy_dd63": selection.spy_dd63,
+            }
+            sleeve_state[name] = stored
+            updated = True
+
+        selected = [str(symbol).upper() for symbol in stored.get("selected_symbols", [])]
+        sleeve_gross = float(stored.get("target_gross_override") or target_gross)
+        weights = stored.get("target_weights") or capped_symbol_weights(
+            selected,
+            {str(k).upper(): float(v) for k, v in (strategy_cfg.get("symbol_weight_caps", {}) or {}).items()},
+        )
+        for symbol in selected:
+            selected_all.append(symbol)
+            target_exposures[symbol] = target_exposures.get(symbol, 0.0) + allocation * sleeve_gross * float(weights.get(symbol, 0.0))
+        reports.append(
+            {
+                "name": name,
+                "allocation": allocation,
+                "phase_offset": phase_offset,
+                "phase_date": latest_phase_date,
+                "due": bool(is_due),
+                "selected_symbols": selected,
+                "selection_mode": stored.get("selection_mode"),
+                "target_gross": sleeve_gross,
+                "target_weights": weights,
+            }
+        )
+
+    if updated:
+        state["phase_sleeves"] = sleeve_state
+    return target_exposures, sorted(set(selected_all)), reports, updated
 
 
 def build_liquidation_plan(close: pd.DataFrame, current_qty: dict[str, int]) -> list[PaperOrderPlan]:
@@ -830,8 +1024,18 @@ def main() -> None:
         rebalance_phase_lock,
         rebalance_phase_anchor_date,
     )
+    phase_sleeves_cfg = strategy_cfg.get("phase_sleeves") or []
+    phase_sleeves_enabled = bool(phase_sleeves_cfg)
+    phase_sleeve_offsets = {int(item.get("phase_offset", 0)) for item in phase_sleeves_cfg}
+    phase_sleeve_missing_state = any(
+        not state.get("phase_sleeves", {}).get(str(item.get("name", f"phase_{item.get('phase_offset', 0)}")), {}).get("last_rebalance_date")
+        for item in phase_sleeves_cfg
+    )
     completed_signal_date = close.index[-1].date().isoformat()
-    if (
+    if phase_sleeves_enabled and phase_status.get("phase_offset") in phase_sleeve_offsets:
+        due = True
+        due_reason = "phase_sleeve_due"
+    elif (
         not args.force_rebalance
         and rebalance_phase_anchor_date
         and phase_status["enabled"]
@@ -860,7 +1064,12 @@ def main() -> None:
         print(json.dumps(report, indent=2))
         return
 
-    if due and phase_status["enabled"] and not phase_status["aligned"] and not args.ignore_phase_lock:
+    phase_allowed = (
+        phase_status["aligned"]
+        or (phase_sleeves_enabled and phase_status.get("phase_offset") in phase_sleeve_offsets)
+        or phase_sleeve_missing_state
+    )
+    if due and phase_status["enabled"] and not phase_allowed and not args.ignore_phase_lock:
         report = {
             "status": "blocked_phase_lock",
             "message": "Rebalance phase lock is enabled; no paper orders submitted outside the locked 7-trading-day phase.",
@@ -870,6 +1079,8 @@ def main() -> None:
             "last_rebalance_date": state.get("last_rebalance_date"),
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
+            "phase_sleeves_enabled": phase_sleeves_enabled,
+            "phase_sleeve_offsets": sorted(phase_sleeve_offsets),
             "rebalance_due_reason": due_reason,
             "force_rebalance": bool(args.force_rebalance),
         }
@@ -934,7 +1145,25 @@ def main() -> None:
         current_qty = {}
 
     active_target_gross = selection.target_gross_override if selection.target_gross_override is not None else target_gross
-    plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross)
+    phase_sleeve_reports: list[dict[str, Any]] = []
+    phase_sleeves_state_updated = False
+    target_exposures: dict[str, float] = {}
+    if phase_sleeves_enabled:
+        target_exposures, chosen, phase_sleeve_reports, phase_sleeves_state_updated = combined_phase_sleeve_targets(
+            close,
+            strategy_cfg,
+            symbols,
+            state,
+            rebalance_phase_anchor_date,
+            rebalance_days,
+            target_gross,
+            phase_status.get("phase_offset"),
+            bool(args.force_rebalance),
+        )
+        active_target_gross = sum(target_exposures.values())
+        plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
+    else:
+        plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross, selection.target_weights)
     if args.buy_only_rebalance:
         plans = [plan for plan in plans if plan.side == "buy"]
     daily_loss_blocked_buys = should_block_new_buys(account)
@@ -971,6 +1200,9 @@ def main() -> None:
         )
         save_state(args.state_path, state)
         state_updated = True
+    elif args.execute and phase_sleeves_state_updated:
+        save_state(args.state_path, state)
+        state_updated = True
     report = {
         "status": "submitted" if args.execute else "dry_run",
         "execute": bool(args.execute),
@@ -984,7 +1216,11 @@ def main() -> None:
         "target_gross_leverage": target_gross,
         "active_target_gross_leverage": active_target_gross,
         "selection_target_gross_override": selection.target_gross_override,
+        "selection_target_weights": selection.target_weights,
         "max_gross_leverage": max_gross,
+        "target_exposures": target_exposures,
+        "phase_sleeves_enabled": phase_sleeves_enabled,
+        "phase_sleeves": phase_sleeve_reports,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
