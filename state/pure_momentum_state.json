@@ -1,12 +1,62 @@
 {
-  "last_order_count": 30,
-  "last_rebalance_at_utc": "2026-05-27T15:44:08.823232+00:00",
+  "last_order_count": 70,
+  "last_rebalance_at_utc": "2026-05-27T19:21:53.977811+00:00",
   "last_rebalance_date": "2026-05-26",
-  "last_rebalance_reason": "forced",
+  "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
-    "SOXL",
     "AMD",
-    "TECL"
+    "MARA",
+    "RIOT",
+    "SOXL",
+    "SPXL",
+    "TECL",
+    "TQQQ"
   ],
-  "strategy": "pure_momentum_spydd_accel_weak_comp_above20ma_gross18"
+  "phase_sleeves": {
+    "phase0_core": {
+      "breadth20": 0.7058823529411765,
+      "last_rebalance_date": "2026-05-22",
+      "selected_symbols": [
+        "SOXL",
+        "AMD",
+        "TECL",
+        "MARA",
+        "TQQQ",
+        "RIOT",
+        "SPXL"
+      ],
+      "selection_mode": "normal_lb63_top7_mom5_pos_above20ma",
+      "spy20": 0.044401507267598284,
+      "spy_dd63": -0.003381542055293285,
+      "target_gross_override": null,
+      "target_weights": {
+        "AMD": 0.16,
+        "MARA": 0.16,
+        "RIOT": 0.16,
+        "SOXL": 0.08000000000000002,
+        "SPXL": 0.16,
+        "TECL": 0.12000000000000002,
+        "TQQQ": 0.16
+      }
+    },
+    "phase1_diversifier": {
+      "breadth20": 0.6470588235294118,
+      "last_rebalance_date": "2026-05-26",
+      "selected_symbols": [
+        "SOXL",
+        "AMD",
+        "TECL"
+      ],
+      "selection_mode": "normal_mid_breadth_spy20_top3_gross13",
+      "spy20": 0.04952674859364481,
+      "spy_dd63": 0.0,
+      "target_gross_override": 1.3,
+      "target_weights": {
+        "AMD": 0.8,
+        "SOXL": 0.08000000000000002,
+        "TECL": 0.12000000000000001
+      }
+    }
+  },
+  "strategy": "pure_momentum_cap_phase_blend_gross12_mid13"
 }
