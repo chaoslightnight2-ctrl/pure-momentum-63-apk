@@ -25,8 +25,9 @@ from src.utils.io_utils import ensure_dir, load_yaml_config, write_json
 
 DAILY_BUY_BLOCK_LOSS_PCT = 0.02
 MIN_DELTA_NOTIONAL = 25.0
+MIN_FRACTIONAL_NOTIONAL = 1.0
 BUYING_POWER_BUFFER = 0.98
-ORDER_BUYING_POWER_BUFFER = 0.85
+ORDER_BUYING_POWER_BUFFER = 0.98
 MANAGED_ORDER_PREFIX = "gh-puremom"
 DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
 OPEN_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "pending_replace", "pending_cancel"}
@@ -574,7 +575,7 @@ def cap_buy_to_current_buying_power(
     }
     if capped_qty < 1 or capped_qty * plan.price < MIN_DELTA_NOTIONAL:
         fractional_notional = min(plan.notional, notional_cap)
-        if fractional_notional >= MIN_DELTA_NOTIONAL:
+        if fractional_notional >= MIN_FRACTIONAL_NOTIONAL:
             info["fractional_notional"] = round(fractional_notional, 2)
             return plan.resized_notional(fractional_notional), info
         return None, info
@@ -688,7 +689,7 @@ def submit_plans(
                             "retry_qty": retry_plan.qty,
                         }
                         row["error"] = str(retry_exc)
-                elif plan.side == "buy" and retry_notional >= MIN_DELTA_NOTIONAL:
+                elif plan.side == "buy" and retry_notional >= MIN_FRACTIONAL_NOTIONAL:
                     retry_plan = plan.resized_notional(min(plan.notional, retry_notional))
                     retry_payload = retry_plan.payload(run_key)
                     try:
