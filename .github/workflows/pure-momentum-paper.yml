@@ -15,6 +15,14 @@ on:
         description: "Paper-only manual override for the daily loss buy block"
         required: false
         default: "false"
+      buy_only_rebalance:
+        description: "Only submit buy orders toward current targets; do not flatten or sell"
+        required: false
+        default: "false"
+      buy_submission_rounds_override:
+        description: "Optional manual override for proportional buy rounds"
+        required: false
+        default: ""
   schedule:
     # Weekdays once after the regular US market open. The bot still checks
     # Alpaca market-open status and only rebalances after 7 trading days.
@@ -67,6 +75,12 @@ jobs:
           fi
           if [ "${{ github.event.inputs.ignore_daily_loss_block }}" = "true" ]; then
             EXTRA_ARGS="$EXTRA_ARGS --ignore-daily-loss-block"
+          fi
+          if [ "${{ github.event.inputs.buy_only_rebalance }}" = "true" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --buy-only-rebalance"
+          fi
+          if [ -n "${{ github.event.inputs.buy_submission_rounds_override }}" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --buy-submission-rounds-override ${{ github.event.inputs.buy_submission_rounds_override }}"
           fi
           python scripts/run_pure_momentum_paper.py --config config/settings.yaml --state-path state/pure_momentum_state.json --execute $EXTRA_ARGS
 

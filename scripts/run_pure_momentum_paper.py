@@ -513,7 +513,11 @@ def split_buy_plans_into_rounds(plans: list[PaperOrderPlan], rounds: int) -> lis
 
 def buying_power_from_error(exc: requests.HTTPError) -> float | None:
     text = str(exc)
-    match = re.search(r'"buying_power"\s*:\s*"([^"]+)"', text)
+    matches = [
+        re.search(r'"daytrading_buying_power"\s*:\s*"([^"]+)"', text),
+        re.search(r'"buying_power"\s*:\s*"([^"]+)"', text),
+    ]
+    match = next((item for item in matches if item), None)
     if not match:
         return None
     try:
@@ -531,11 +535,20 @@ def cap_buy_to_current_buying_power(
 
     account = client.get_account()
     buying_power = float(account.get("buying_power") or 0.0)
-    affordable_qty = int(math.floor((buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if plan.price > 0 else 0
+    daytrading_buying_power_raw = account.get("daytrading_buying_power")
+    daytrading_buying_power = (
+        float(daytrading_buying_power_raw)
+        if daytrading_buying_power_raw not in (None, "")
+        else buying_power
+    )
+    effective_buying_power = min(buying_power, daytrading_buying_power)
+    affordable_qty = int(math.floor((effective_buying_power * ORDER_BUYING_POWER_BUFFER) / plan.price)) if plan.price > 0 else 0
     capped_qty = min(plan.qty, affordable_qty)
     info = {
         "applied": capped_qty < plan.qty,
         "buying_power": round(buying_power, 2),
+        "daytrading_buying_power": round(daytrading_buying_power, 2),
+        "effective_buying_power": round(effective_buying_power, 2),
         "original_qty": plan.qty,
         "capped_qty": capped_qty,
     }
@@ -690,6 +703,8 @@ def main() -> None:
     parser.add_argument("--force-rebalance", action="store_true")
     parser.add_argument("--ignore-phase-lock", action="store_true")
     parser.add_argument("--ignore-daily-loss-block", action="store_true")
+    parser.add_argument("--buy-only-rebalance", action="store_true")
+    parser.add_argument("--buy-submission-rounds-override", type=int)
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
@@ -707,6 +722,8 @@ def main() -> None:
     flatten_wait_seconds = int(strategy_cfg.get("flatten_wait_seconds", 60))
     order_fill_wait_seconds = int(strategy_cfg.get("order_fill_wait_seconds", 45))
     buy_submission_rounds = int(strategy_cfg.get("buy_submission_rounds", 10))
+    if args.buy_submission_rounds_override:
+        buy_submission_rounds = max(1, int(args.buy_submission_rounds_override))
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_spy20_sleeve_gross18"))
@@ -808,7 +825,7 @@ def main() -> None:
     equity = float(account.get("equity") or 0.0)
     buying_power = float(account.get("buying_power") or 0.0)
     flatten_orders: list[dict[str, Any]] = []
-    if sell_all_before_rebalance and current_qty:
+    if sell_all_before_rebalance and current_qty and not args.buy_only_rebalance:
         flatten_plans = build_liquidation_plan(close, current_qty)
         run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
         flatten_orders = submit_plans(
@@ -847,6 +864,8 @@ def main() -> None:
 
     active_target_gross = selection.target_gross_override if selection.target_gross_override is not None else target_gross
     plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross)
+    if args.buy_only_rebalance:
+        plans = [plan for plan in plans if plan.side == "buy"]
     daily_loss_blocked_buys = should_block_new_buys(account)
     if daily_loss_blocked_buys and not args.ignore_daily_loss_block:
         plans = [plan for plan in plans if plan.side == "sell"]
@@ -868,7 +887,7 @@ def main() -> None:
     final_open_orders = client.get_orders(status="open", nested=True) if args.execute else []
     completed_signal_date = str(close.index[-1].date())
     state_updated = False
-    if args.execute:
+    if args.execute and not args.buy_only_rebalance:
         state.update(
             {
                 "last_rebalance_date": completed_signal_date,
@@ -908,6 +927,7 @@ def main() -> None:
         "state_updated": state_updated,
         "sell_all_before_rebalance": sell_all_before_rebalance,
         "buy_submission_rounds": buy_submission_rounds,
+        "buy_only_rebalance": bool(args.buy_only_rebalance),
         "flatten_orders": flatten_orders,
         "buying_power": buying_power,
         "buying_power_adjustment": buying_power_adjustment,
