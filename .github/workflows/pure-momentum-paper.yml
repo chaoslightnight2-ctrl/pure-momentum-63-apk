@@ -11,6 +11,10 @@ on:
         description: "Emergency override for rebalance phase lock"
         required: false
         default: "false"
+      ignore_daily_loss_block:
+        description: "Paper-only manual override for the daily loss buy block"
+        required: false
+        default: "false"
   schedule:
     # Weekdays once after the regular US market open. The bot still checks
     # Alpaca market-open status and only rebalances after 7 trading days.
@@ -60,6 +64,9 @@ jobs:
           fi
           if [ "${{ github.event.inputs.ignore_phase_lock }}" = "true" ]; then
             EXTRA_ARGS="$EXTRA_ARGS --ignore-phase-lock"
+          fi
+          if [ "${{ github.event.inputs.ignore_daily_loss_block }}" = "true" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --ignore-daily-loss-block"
           fi
           python scripts/run_pure_momentum_paper.py --config config/settings.yaml --state-path state/pure_momentum_state.json --execute $EXTRA_ARGS
 

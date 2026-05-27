@@ -689,6 +689,7 @@ def main() -> None:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--force-rebalance", action="store_true")
     parser.add_argument("--ignore-phase-lock", action="store_true")
+    parser.add_argument("--ignore-daily-loss-block", action="store_true")
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
@@ -846,7 +847,8 @@ def main() -> None:
 
     active_target_gross = selection.target_gross_override if selection.target_gross_override is not None else target_gross
     plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross)
-    if should_block_new_buys(account):
+    daily_loss_blocked_buys = should_block_new_buys(account)
+    if daily_loss_blocked_buys and not args.ignore_daily_loss_block:
         plans = [plan for plan in plans if plan.side == "sell"]
 
     plans, buying_power_adjustment = fit_buys_to_buying_power(plans, buying_power)
@@ -898,6 +900,11 @@ def main() -> None:
         "last_rebalance_date": state.get("last_rebalance_date"),
         "trading_days_since_rebalance": trading_days_elapsed,
         "rebalance_phase": phase_status,
+        "daily_loss_block": {
+            "triggered": daily_loss_blocked_buys,
+            "ignored": bool(args.ignore_daily_loss_block),
+            "threshold_pct": DAILY_BUY_BLOCK_LOSS_PCT * 100.0,
+        },
         "state_updated": state_updated,
         "sell_all_before_rebalance": sell_all_before_rebalance,
         "buy_submission_rounds": buy_submission_rounds,
