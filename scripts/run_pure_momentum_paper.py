@@ -107,6 +107,7 @@ def rank_symbols(
     top_n: int,
     min_momentum: float | None,
     min_short_momentum: float | None = None,
+    require_above_ma_days: int | None = None,
 ) -> list[str]:
     momentum = close[symbols].iloc[-1] / close[symbols].iloc[-lookback_days - 1] - 1.0
     momentum = momentum.replace([float("inf"), float("-inf")], pd.NA).dropna()
@@ -116,6 +117,15 @@ def rank_symbols(
         short_momentum = close[symbols].iloc[-1] / close[symbols].iloc[-6] - 1.0
         short_momentum = short_momentum.replace([float("inf"), float("-inf")], pd.NA)
         momentum = momentum.loc[short_momentum.reindex(momentum.index) >= min_short_momentum]
+    if require_above_ma_days is not None:
+        if require_above_ma_days <= 0:
+            raise ValueError("require_above_ma_days must be positive")
+        if len(close) <= require_above_ma_days:
+            return []
+        latest = close[symbols].iloc[-1]
+        moving_average = close[symbols].iloc[-require_above_ma_days:].mean()
+        above_ma = latest > moving_average
+        momentum = momentum.loc[above_ma.reindex(momentum.index).fillna(False)]
     momentum = momentum.sort_values(ascending=False)
     return [str(symbol) for symbol in momentum.head(top_n).index]
 
@@ -186,6 +196,11 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     min_momentum = None if min_momentum_raw is None else float(min_momentum_raw)
     min_short_raw = strategy_cfg.get("normal_min_5d_momentum")
     min_short_momentum = None if min_short_raw is None else float(min_short_raw)
+    normal_above_ma_days = (
+        int(strategy_cfg.get("normal_above_ma_days", 20))
+        if bool(strategy_cfg.get("normal_require_above_20d_ma", False))
+        else None
+    )
     breadth_lookback = int(strategy_cfg.get("breadth_lookback_days", 20))
     mid_low = float(strategy_cfg.get("mid_breadth_cash_low", 0.50))
     mid_high = float(strategy_cfg.get("mid_breadth_cash_high", 0.66))
@@ -272,8 +287,8 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     if mid_low <= breadth20 < mid_high:
         return SelectionResult([], "normal_mid_breadth_cash", breadth20, spy20, spy_dd63)
     return SelectionResult(
-        rank_symbols(close, universe, lookback_days, top_n, min_momentum, min_short_momentum),
-        "normal_lb63_top7_mom5_pos",
+        rank_symbols(close, universe, lookback_days, top_n, min_momentum, min_short_momentum, normal_above_ma_days),
+        "normal_lb63_top7_mom5_pos_above20ma" if normal_above_ma_days == 20 else "normal_lb63_top7_mom5_pos",
         breadth20,
         spy20,
         spy_dd63,

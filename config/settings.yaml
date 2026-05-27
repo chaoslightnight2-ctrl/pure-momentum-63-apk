@@ -9,7 +9,7 @@ reports:
   directory: reports
 
 pure_momentum:
-  name: pure_momentum_spydd_accel_weak_comp_gross18
+  name: pure_momentum_spydd_accel_weak_comp_above20ma_gross18
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 7
@@ -23,6 +23,8 @@ pure_momentum:
   max_gross_leverage: 1.8
   min_momentum: 0.0
   normal_min_5d_momentum: 0.0
+  normal_require_above_20d_ma: true
+  normal_above_ma_days: 20
   regime_symbol: SPY
   breadth_lookback_days: 20
   mid_breadth_cash_low: 0.50
