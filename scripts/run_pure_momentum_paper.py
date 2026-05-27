@@ -31,6 +31,7 @@ ORDER_BUYING_POWER_BUFFER = 0.98
 MANAGED_ORDER_PREFIX = "gh-puremom"
 DEFAULT_STATE_PATH = "state/pure_momentum_state.json"
 OPEN_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "pending_replace", "pending_cancel"}
+FILLED_ORDER_STATES = {"filled", "partially_filled"}
 
 
 @dataclass
@@ -94,6 +95,15 @@ class SelectionResult:
     target_weights: dict[str, float] | None = None
 
 
+def as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def latest_completed_daily_close(raw: pd.DataFrame) -> pd.DataFrame:
     close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
     if isinstance(close, pd.Series):
@@ -117,6 +127,121 @@ def fetch_close_frame(symbols: list[str], lookback_days: int) -> pd.DataFrame:
     if len(close) <= lookback_days:
         raise RuntimeError(f"Not enough completed daily bars: {len(close)} <= {lookback_days}")
     return close
+
+
+def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, Any]) -> dict[str, Any]:
+    lock_cfg = evidence_cfg.get("forward_lock", {}) or {}
+    if not bool(lock_cfg.get("enabled", False)):
+        return {"enabled": False, "passed": True, "mismatches": []}
+
+    checks: list[tuple[str, Any, Any]] = [
+        ("strategy_name", strategy_cfg.get("name"), lock_cfg.get("strategy_name")),
+        ("lookback_days", int(strategy_cfg.get("lookback_days", 0)), int(lock_cfg.get("lookback_days", 0))),
+        ("top_n", int(strategy_cfg.get("top_n", 0)), int(lock_cfg.get("top_n", 0))),
+        ("rebalance_days", int(strategy_cfg.get("rebalance_days", 0)), int(lock_cfg.get("rebalance_days", 0))),
+        (
+            "target_gross_leverage",
+            round(float(strategy_cfg.get("target_gross_leverage", 0.0)), 6),
+            round(float(lock_cfg.get("target_gross_leverage", 0.0)), 6),
+        ),
+        (
+            "max_gross_leverage",
+            round(float(strategy_cfg.get("max_gross_leverage", 0.0)), 6),
+            round(float(lock_cfg.get("max_gross_leverage", 0.0)), 6),
+        ),
+    ]
+    mismatches = [
+        {"field": field, "actual": actual, "locked": locked}
+        for field, actual, locked in checks
+        if actual != locked
+    ]
+
+    actual_caps = {str(k).upper(): round(float(v), 6) for k, v in (strategy_cfg.get("symbol_weight_caps", {}) or {}).items()}
+    locked_caps = {str(k).upper(): round(float(v), 6) for k, v in (lock_cfg.get("symbol_weight_caps", {}) or {}).items()}
+    if actual_caps != locked_caps:
+        mismatches.append({"field": "symbol_weight_caps", "actual": actual_caps, "locked": locked_caps})
+
+    actual_sleeves = {
+        str(item.get("name")): round(float(item.get("allocation", 0.0)), 6)
+        for item in (strategy_cfg.get("phase_sleeves") or [])
+    }
+    locked_sleeves = {str(k): round(float(v), 6) for k, v in (lock_cfg.get("phase_sleeves", {}) or {}).items()}
+    if actual_sleeves != locked_sleeves:
+        mismatches.append({"field": "phase_sleeves", "actual": actual_sleeves, "locked": locked_sleeves})
+
+    return {
+        "enabled": True,
+        "passed": not mismatches,
+        "locked_at_utc": lock_cfg.get("locked_at_utc"),
+        "mismatches": mismatches,
+    }
+
+
+def anomaly_guard_report(
+    close: pd.DataFrame,
+    symbols: list[str],
+    evidence_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    guard_cfg = evidence_cfg.get("anomaly_guard", {}) or {}
+    if not bool(guard_cfg.get("enabled", False)):
+        return {"enabled": False, "passed": True, "issues": []}
+
+    issues: list[dict[str, Any]] = []
+    latest_date = close.index[-1].normalize()
+    today_ny = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+    stale_days = int((today_ny - latest_date).days)
+    max_stale_days = int(guard_cfg.get("max_completed_data_stale_days", 5))
+    if stale_days > max_stale_days:
+        issues.append(
+            {
+                "type": "stale_completed_daily_data",
+                "latest_completed_date": latest_date.date().isoformat(),
+                "stale_days": stale_days,
+                "max_stale_days": max_stale_days,
+            }
+        )
+
+    latest = close.reindex(columns=symbols).iloc[-1]
+    coverage = float(latest.notna().mean()) if len(latest) else 0.0
+    min_coverage = float(guard_cfg.get("min_latest_universe_coverage", 0.90))
+    if coverage < min_coverage:
+        issues.append(
+            {
+                "type": "low_latest_universe_coverage",
+                "coverage": coverage,
+                "min_coverage": min_coverage,
+                "missing_symbols": [str(symbol) for symbol, value in latest.items() if pd.isna(value)],
+            }
+        )
+
+    nonpositive = [str(symbol) for symbol, value in latest.items() if pd.notna(value) and float(value) <= 0.0]
+    if nonpositive:
+        issues.append({"type": "nonpositive_latest_close", "symbols": nonpositive})
+
+    max_abs_daily_return = float(guard_cfg.get("max_abs_daily_return", 0.85))
+    if len(close) >= 2:
+        last_return = close.reindex(columns=symbols).pct_change().iloc[-1].replace([float("inf"), float("-inf")], pd.NA)
+        outliers = {
+            str(symbol): float(value)
+            for symbol, value in last_return.dropna().items()
+            if abs(float(value)) > max_abs_daily_return
+        }
+        if outliers:
+            issues.append(
+                {
+                    "type": "absurd_latest_daily_return",
+                    "max_abs_daily_return": max_abs_daily_return,
+                    "symbols": outliers,
+                }
+            )
+
+    return {
+        "enabled": True,
+        "passed": not issues,
+        "latest_completed_date": latest_date.date().isoformat(),
+        "latest_universe_coverage": coverage,
+        "issues": issues,
+    }
 
 
 def rank_symbols(
@@ -556,6 +681,35 @@ def build_plan_from_target_exposures(
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
 
 
+def target_qty_from_exposures(
+    close: pd.DataFrame,
+    target_exposures: dict[str, float],
+    equity: float,
+    max_gross: float,
+) -> dict[str, int]:
+    total_gross = sum(max(0.0, float(weight)) for weight in target_exposures.values())
+    scale = min(1.0, max_gross / total_gross) if total_gross > max_gross and total_gross > 0.0 else 1.0
+    target_qty: dict[str, int] = {}
+    for symbol, exposure in target_exposures.items():
+        if symbol not in close.columns:
+            continue
+        price = float(close[symbol].iloc[-1])
+        target_qty[symbol] = int(math.floor((equity * float(exposure) * scale) / price)) if price > 0.0 else 0
+    return target_qty
+
+
+def target_exposures_from_selection(
+    selected: list[str],
+    target_gross: float,
+    target_weights: dict[str, float] | None,
+) -> dict[str, float]:
+    if not selected:
+        return {}
+    if target_weights is None:
+        target_weights = {symbol: 1.0 / len(selected) for symbol in selected}
+    return {symbol: target_gross * float(target_weights.get(symbol, 0.0)) for symbol in selected}
+
+
 def combined_phase_sleeve_targets(
     close: pd.DataFrame,
     strategy_cfg: dict[str, Any],
@@ -960,6 +1114,69 @@ def submit_rebalance_plans(
     return submitted
 
 
+def execution_drift_report(
+    orders: list[dict[str, Any]],
+    target_qty: dict[str, int],
+    final_qty: dict[str, int],
+    open_order_count: int,
+    evidence_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    drift_cfg = evidence_cfg.get("execution_drift", {}) or {}
+    if not bool(drift_cfg.get("enabled", False)):
+        return {"enabled": False, "passed": True}
+
+    symbols = sorted(set(target_qty) | set(final_qty))
+    rows = []
+    max_abs_drift = 0
+    for symbol in symbols:
+        target = int(target_qty.get(symbol, 0))
+        final = int(final_qty.get(symbol, 0))
+        drift = final - target
+        max_abs_drift = max(max_abs_drift, abs(drift))
+        rows.append({"symbol": symbol, "target_qty": target, "final_qty": final, "drift_qty": drift})
+
+    planned_buy_notional = sum(float(order.get("notional_estimate") or 0.0) for order in orders if order.get("side") == "buy")
+    filled_buy_notional = 0.0
+    rejected_orders = []
+    for order in orders:
+        state = str(order.get("state", "")).lower()
+        if state.startswith("rejected") or state.startswith("skipped"):
+            rejected_orders.append(
+                {
+                    "symbol": order.get("symbol"),
+                    "side": order.get("side"),
+                    "state": order.get("state"),
+                    "error": order.get("error"),
+                }
+            )
+        if order.get("side") != "buy" or state not in FILLED_ORDER_STATES:
+            continue
+        filled_qty = as_float(order.get("filled_qty"))
+        filled_price = as_float(order.get("filled_avg_price"))
+        filled_buy_notional += filled_qty * filled_price
+
+    max_symbol_qty_drift = int(drift_cfg.get("max_symbol_qty_drift", 1))
+    max_open_orders = int(drift_cfg.get("max_open_orders_after_run", 0))
+    fill_ratio = filled_buy_notional / planned_buy_notional if planned_buy_notional > 0.0 else None
+    passed = (
+        max_abs_drift <= max_symbol_qty_drift
+        and open_order_count <= max_open_orders
+        and not rejected_orders
+    )
+    return {
+        "enabled": True,
+        "passed": passed,
+        "max_symbol_qty_drift_allowed": max_symbol_qty_drift,
+        "max_abs_symbol_qty_drift": max_abs_drift,
+        "open_order_count_after_run": open_order_count,
+        "planned_buy_notional": round(planned_buy_notional, 2),
+        "filled_buy_notional": round(filled_buy_notional, 2),
+        "buy_fill_ratio": round(fill_ratio, 6) if fill_ratio is not None else None,
+        "rejected_or_skipped_orders": rejected_orders,
+        "symbol_drifts": rows,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/settings.yaml")
@@ -974,6 +1191,7 @@ def main() -> None:
 
     config = load_yaml_config(args.config)
     strategy_cfg = config.get("pure_momentum", {})
+    evidence_cfg = config.get("evidence", {})
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
     regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
     data_symbols = sorted(set(symbols + [regime_symbol]))
@@ -993,6 +1211,18 @@ def main() -> None:
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_spy20_sleeve_gross18"))
     state = load_state(args.state_path)
+    forward_lock = forward_lock_report(strategy_cfg, evidence_cfg)
+    if not forward_lock["passed"]:
+        report = {
+            "status": "blocked_forward_lock",
+            "message": "Forward-lock evidence is enabled and the configured strategy no longer matches the locked paper profile.",
+            "strategy": strategy_name,
+            "evidence": {"forward_lock": forward_lock},
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
+        print(json.dumps(report, indent=2))
+        return
 
     client = AlpacaPaperTradingClient.from_env()
     account = client.get_account()
@@ -1000,15 +1230,40 @@ def main() -> None:
         raise RuntimeError("Alpaca paper account is not active/tradable")
 
     clock = client.get_clock()
+    close = fetch_close_frame(data_symbols, max(lookback_days, 63))
+    anomaly_guard = anomaly_guard_report(close, data_symbols, evidence_cfg)
+    if not anomaly_guard["passed"]:
+        report = {
+            "status": "blocked_data_anomaly",
+            "message": "Data anomaly guard blocked paper orders before target calculation.",
+            "strategy": strategy_name,
+            "clock": clock,
+            "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
+        print(json.dumps(report, indent=2))
+        return
+    selection = select_strategy_symbols(close, strategy_cfg, symbols)
+    chosen = selection.symbols
     if not clock.get("is_open"):
-        report = {"status": "market_closed", "message": "Market is closed; no paper orders submitted.", "clock": clock}
+        report = {
+            "status": "market_closed",
+            "message": "Market is closed; no paper orders submitted, but forward-lock signal evidence was recorded.",
+            "strategy": strategy_name,
+            "clock": clock,
+            "selected_symbols": chosen,
+            "selection_mode": selection.mode,
+            "breadth20": selection.breadth20,
+            "spy20": selection.spy20,
+            "spy_dd63": selection.spy_dd63,
+            "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
         return
 
-    close = fetch_close_frame(data_symbols, max(lookback_days, 63))
-    selection = select_strategy_symbols(close, strategy_cfg, symbols)
-    chosen = selection.symbols
     positions = client.get_positions()
     current_qty = managed_positions(positions, universe)
     due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
@@ -1059,6 +1314,7 @@ def main() -> None:
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+            "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -1083,6 +1339,7 @@ def main() -> None:
             "phase_sleeve_offsets": sorted(phase_sleeve_offsets),
             "rebalance_due_reason": due_reason,
             "force_rebalance": bool(args.force_rebalance),
+            "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -1099,6 +1356,7 @@ def main() -> None:
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+            "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
@@ -1134,6 +1392,7 @@ def main() -> None:
                 "sell_all_before_rebalance": sell_all_before_rebalance,
                 "flatten_orders": flatten_orders,
                 "message": "Flatten orders were submitted; buy rebalance will wait until managed positions and open orders clear.",
+                "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
                 "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             }
             write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1148,6 +1407,7 @@ def main() -> None:
     phase_sleeve_reports: list[dict[str, Any]] = []
     phase_sleeves_state_updated = False
     target_exposures: dict[str, float] = {}
+    target_qty: dict[str, int] = {}
     if phase_sleeves_enabled:
         target_exposures, chosen, phase_sleeve_reports, phase_sleeves_state_updated = combined_phase_sleeve_targets(
             close,
@@ -1161,8 +1421,11 @@ def main() -> None:
             bool(args.force_rebalance),
         )
         active_target_gross = sum(target_exposures.values())
+        target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
         plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
     else:
+        target_exposures = target_exposures_from_selection(chosen, active_target_gross, selection.target_weights)
+        target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
         plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross, selection.target_weights)
     if args.buy_only_rebalance:
         plans = [plan for plan in plans if plan.side == "buy"]
@@ -1185,6 +1448,13 @@ def main() -> None:
     final_account = client.get_account() if args.execute else account
     final_positions = managed_positions(client.get_positions(), universe) if args.execute else current_qty
     final_open_orders = client.get_orders(status="open", nested=True) if args.execute else []
+    execution_drift = execution_drift_report(
+        submitted,
+        target_qty,
+        final_positions,
+        len(final_open_orders),
+        evidence_cfg,
+    )
     completed_signal_date = str(close.index[-1].date())
     state_updated = False
     if args.execute and not args.buy_only_rebalance:
@@ -1219,6 +1489,7 @@ def main() -> None:
         "selection_target_weights": selection.target_weights,
         "max_gross_leverage": max_gross,
         "target_exposures": target_exposures,
+        "target_qty": target_qty,
         "phase_sleeves_enabled": phase_sleeves_enabled,
         "phase_sleeves": phase_sleeve_reports,
         "rebalance_due": due,
@@ -1245,6 +1516,11 @@ def main() -> None:
         "final_qty": final_positions,
         "open_order_count_after_run": len(final_open_orders),
         "orders": submitted,
+        "evidence": {
+            "forward_lock": forward_lock,
+            "anomaly_guard": anomaly_guard,
+            "execution_drift": execution_drift,
+        },
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)

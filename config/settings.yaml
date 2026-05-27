@@ -8,6 +8,32 @@ risk:
 reports:
   directory: reports
 
+evidence:
+  forward_lock:
+    enabled: true
+    locked_at_utc: "2026-05-27T20:30:00Z"
+    strategy_name: pure_momentum_cap_phase_blend_gross12_mid13
+    lookback_days: 63
+    top_n: 7
+    rebalance_days: 7
+    target_gross_leverage: 1.2
+    max_gross_leverage: 1.3
+    phase_sleeves:
+      phase0_core: 0.85
+      phase1_diversifier: 0.15
+    symbol_weight_caps:
+      SOXL: 0.08
+      TECL: 0.12
+  anomaly_guard:
+    enabled: true
+    max_completed_data_stale_days: 5
+    max_abs_daily_return: 0.85
+    min_latest_universe_coverage: 0.90
+  execution_drift:
+    enabled: true
+    max_symbol_qty_drift: 1
+    max_open_orders_after_run: 0
+
 pure_momentum:
   name: pure_momentum_cap_phase_blend_gross12_mid13
   backtest_start: "2023-04-25"

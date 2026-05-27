@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from scripts.run_pure_momentum_paper import (
+    anomaly_guard_report,
+    execution_drift_report,
+    forward_lock_report,
+)
+
+
+def test_forward_lock_passes_matching_profile() -> None:
+    strategy = {
+        "name": "pure_momentum_cap_phase_blend_gross12_mid13",
+        "lookback_days": 63,
+        "top_n": 7,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.3,
+        "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+        "phase_sleeves": [
+            {"name": "phase0_core", "allocation": 0.85},
+            {"name": "phase1_diversifier", "allocation": 0.15},
+        ],
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid13",
+            "lookback_days": 63,
+            "top_n": 7,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.3,
+            "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+            "phase_sleeves": {"phase0_core": 0.85, "phase1_diversifier": 0.15},
+        }
+    }
+
+    report = forward_lock_report(strategy, evidence)
+
+    assert report["passed"] is True
+    assert report["mismatches"] == []
+
+
+def test_forward_lock_blocks_changed_allocation() -> None:
+    strategy = {
+        "name": "pure_momentum_cap_phase_blend_gross12_mid13",
+        "lookback_days": 63,
+        "top_n": 7,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.3,
+        "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+        "phase_sleeves": [
+            {"name": "phase0_core", "allocation": 0.70},
+            {"name": "phase1_diversifier", "allocation": 0.30},
+        ],
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid13",
+            "lookback_days": 63,
+            "top_n": 7,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.3,
+            "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+            "phase_sleeves": {"phase0_core": 0.85, "phase1_diversifier": 0.15},
+        }
+    }
+
+    report = forward_lock_report(strategy, evidence)
+
+    assert report["passed"] is False
+    assert report["mismatches"][0]["field"] == "phase_sleeves"
+
+
+def test_anomaly_guard_blocks_absurd_latest_return() -> None:
+    close = pd.DataFrame(
+        {
+            "AAA": [100.0, 250.0],
+            "SPY": [100.0, 101.0],
+        },
+        index=pd.to_datetime(["2026-05-26", pd.Timestamp.now(tz="America/New_York").date()]),
+    )
+    evidence = {
+        "anomaly_guard": {
+            "enabled": True,
+            "max_completed_data_stale_days": 5,
+            "max_abs_daily_return": 0.85,
+            "min_latest_universe_coverage": 0.90,
+        }
+    }
+
+    report = anomaly_guard_report(close, ["AAA", "SPY"], evidence)
+
+    assert report["passed"] is False
+    assert any(issue["type"] == "absurd_latest_daily_return" for issue in report["issues"])
+
+
+def test_execution_drift_passes_filled_targets() -> None:
+    orders = [
+        {
+            "symbol": "AAA",
+            "side": "buy",
+            "state": "filled",
+            "notional_estimate": 100.0,
+            "filled_qty": "10",
+            "filled_avg_price": "10",
+        }
+    ]
+    evidence = {"execution_drift": {"enabled": True, "max_symbol_qty_drift": 1, "max_open_orders_after_run": 0}}
+
+    report = execution_drift_report(orders, {"AAA": 10}, {"AAA": 10}, 0, evidence)
+
+    assert report["passed"] is True
+    assert report["buy_fill_ratio"] == 1.0
