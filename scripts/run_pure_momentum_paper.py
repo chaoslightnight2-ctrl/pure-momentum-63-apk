@@ -1211,6 +1211,7 @@ def main() -> None:
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_spy20_sleeve_gross18"))
     state = load_state(args.state_path)
+    strategy_rebalance_pending = bool(state.get("pending_strategy_rebalance")) or state.get("strategy") != strategy_name
     forward_lock = forward_lock_report(strategy_cfg, evidence_cfg)
     if not forward_lock["passed"]:
         report = {
@@ -1257,6 +1258,7 @@ def main() -> None:
             "breadth20": selection.breadth20,
             "spy20": selection.spy20,
             "spy_dd63": selection.spy_dd63,
+            "strategy_rebalance_pending": strategy_rebalance_pending,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -1290,6 +1292,9 @@ def main() -> None:
     if phase_sleeves_enabled and phase_status.get("phase_offset") in phase_sleeve_offsets:
         due = True
         due_reason = "phase_sleeve_due"
+    elif strategy_rebalance_pending:
+        due = True
+        due_reason = "strategy_profile_changed"
     elif (
         not args.force_rebalance
         and rebalance_phase_anchor_date
@@ -1324,6 +1329,7 @@ def main() -> None:
         phase_status["aligned"]
         or (phase_sleeves_enabled and phase_status.get("phase_offset") in phase_sleeve_offsets)
         or phase_sleeve_missing_state
+        or strategy_rebalance_pending
     )
     if due and phase_status["enabled"] and not phase_allowed and not args.ignore_phase_lock:
         report = {
@@ -1338,6 +1344,7 @@ def main() -> None:
             "phase_sleeves_enabled": phase_sleeves_enabled,
             "phase_sleeve_offsets": sorted(phase_sleeve_offsets),
             "rebalance_due_reason": due_reason,
+            "strategy_rebalance_pending": strategy_rebalance_pending,
             "force_rebalance": bool(args.force_rebalance),
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
@@ -1356,6 +1363,7 @@ def main() -> None:
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+            "strategy_rebalance_pending": strategy_rebalance_pending,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1468,6 +1476,7 @@ def main() -> None:
                 "strategy": strategy_name,
             }
         )
+        state.pop("pending_strategy_rebalance", None)
         save_state(args.state_path, state)
         state_updated = True
     elif args.execute and phase_sleeves_state_updated:
@@ -1494,6 +1503,7 @@ def main() -> None:
         "phase_sleeves": phase_sleeve_reports,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
+        "strategy_rebalance_pending": strategy_rebalance_pending,
         "last_rebalance_date": state.get("last_rebalance_date"),
         "trading_days_since_rebalance": trading_days_elapsed,
         "rebalance_phase": phase_status,
