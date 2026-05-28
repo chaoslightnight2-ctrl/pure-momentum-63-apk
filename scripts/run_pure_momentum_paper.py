@@ -908,7 +908,7 @@ def cap_buy_to_current_buying_power(
         if daytrading_buying_power_raw not in (None, "")
         else buying_power
     )
-    effective_buying_power = min(buying_power, daytrading_buying_power)
+    effective_buying_power = min(buying_power, daytrading_buying_power) if daytrading_buying_power > 0.0 else buying_power
     remaining_buy_count = max(1, remaining_buy_count)
     notional_cap = (effective_buying_power * ORDER_BUYING_POWER_BUFFER) / remaining_buy_count
     affordable_qty = int(math.floor(notional_cap / plan.price)) if plan.price > 0 else 0

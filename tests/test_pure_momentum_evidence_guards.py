@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.run_pure_momentum_paper import (
+    PaperOrderPlan,
     anomaly_guard_report,
+    cap_buy_to_current_buying_power,
     execution_drift_report,
     forward_lock_report,
 )
@@ -123,3 +125,18 @@ def test_execution_drift_passes_filled_targets() -> None:
 
     assert report["passed"] is True
     assert report["buy_fill_ratio"] == 1.0
+
+
+def test_buying_power_cap_uses_buying_power_when_daytrading_power_zero() -> None:
+    class FakeClient:
+        def get_account(self) -> dict[str, str]:
+            return {"buying_power": "200000", "daytrading_buying_power": "0"}
+
+    plan = PaperOrderPlan(symbol="AMD", side="buy", qty=61, price=500.0, target_qty=61)
+
+    capped, info = cap_buy_to_current_buying_power(FakeClient(), plan)
+
+    assert capped is not None
+    assert capped.qty == 61
+    assert info["effective_buying_power"] == 200000.0
+    assert info["applied"] is False
