@@ -11,13 +11,13 @@ reports:
 evidence:
   forward_lock:
     enabled: true
-    locked_at_utc: "2026-05-27T20:30:00Z"
-    strategy_name: pure_momentum_cap_phase_blend_gross12_mid13
+    locked_at_utc: "2026-05-28T14:50:00Z"
+    strategy_name: pure_momentum_cap_phase_blend_gross14_mid14
     lookback_days: 63
     top_n: 7
     rebalance_days: 7
-    target_gross_leverage: 1.2
-    max_gross_leverage: 1.3
+    target_gross_leverage: 1.4
+    max_gross_leverage: 1.4
     phase_sleeves:
       phase0_core: 0.85
       phase1_diversifier: 0.15
@@ -35,7 +35,7 @@ evidence:
     max_open_orders_after_run: 0
 
 pure_momentum:
-  name: pure_momentum_cap_phase_blend_gross12_mid13
+  name: pure_momentum_cap_phase_blend_gross14_mid14
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 7
@@ -46,8 +46,8 @@ pure_momentum:
   flatten_wait_seconds: 60
   order_fill_wait_seconds: 45
   buy_submission_rounds: 10
-  target_gross_leverage: 1.2
-  max_gross_leverage: 1.3
+  target_gross_leverage: 1.4
+  max_gross_leverage: 1.4
   phase_sleeves:
     - name: phase0_core
       phase_offset: 0
@@ -68,7 +68,7 @@ pure_momentum:
   mid_breadth_cash_high: 0.66
   mid_breadth_sleeve_spy20_min: 0.025
   mid_breadth_sleeve_top_n: 3
-  mid_breadth_sleeve_gross_leverage: 1.3
+  mid_breadth_sleeve_gross_leverage: 1.4
   spydd_score: acceleration_20_minus_63
   spydd_top_n: 2
   spydd_min_20d_momentum: 0.0
