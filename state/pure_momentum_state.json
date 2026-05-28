@@ -38,7 +38,25 @@
         "TECL": 0.12000000000000002,
         "TQQQ": 0.16
       }
+    },
+    "phase1_diversifier": {
+      "breadth20": 0.6470588235294118,
+      "last_rebalance_date": "2026-05-26",
+      "selected_symbols": [
+        "SOXL",
+        "AMD",
+        "TECL"
+      ],
+      "selection_mode": "normal_mid_breadth_spy20_top3_gross13",
+      "spy20": 0.04952674859364481,
+      "spy_dd63": 0.0,
+      "target_gross_override": 1.2,
+      "target_weights": {
+        "AMD": 0.8,
+        "SOXL": 0.08000000000000002,
+        "TECL": 0.12000000000000001
+      }
     }
   },
-  "strategy": "pure_momentum_phase0_cap_soxl08_tecl12_gross12"
+  "strategy": "pure_momentum_cap_phase_blend_gross14_mid14"
 }
