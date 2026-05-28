@@ -50,7 +50,7 @@
       "selection_mode": "normal_mid_breadth_spy20_top3_gross13",
       "spy20": 0.04952674859364481,
       "spy_dd63": 0.0,
-      "target_gross_override": 1.4,
+      "target_gross_override": 1.2,
       "target_weights": {
         "AMD": 0.8,
         "SOXL": 0.08000000000000002,
