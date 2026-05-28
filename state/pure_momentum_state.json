@@ -12,7 +12,6 @@
     "TECL",
     "TQQQ"
   ],
-  "pending_strategy_rebalance": true,
   "phase_sleeves": {
     "phase0_core": {
       "breadth20": 0.7058823529411765,
