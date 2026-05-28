@@ -19,29 +19,28 @@ from scripts.run_pure_momentum_paper import (
 
 def test_forward_lock_passes_matching_profile() -> None:
     strategy = {
-        "name": "pure_momentum_cap_phase_blend_gross12_mid13",
+        "name": "pure_momentum_phase0_cap_soxl08_tecl12_gross12",
         "lookback_days": 63,
         "top_n": 7,
         "rebalance_days": 7,
         "target_gross_leverage": 1.2,
-        "max_gross_leverage": 1.3,
+        "max_gross_leverage": 1.2,
         "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
         "phase_sleeves": [
-            {"name": "phase0_core", "allocation": 0.85},
-            {"name": "phase1_diversifier", "allocation": 0.15},
+            {"name": "phase0_core", "allocation": 1.0},
         ],
     }
     evidence = {
         "forward_lock": {
             "enabled": True,
-            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid13",
+            "strategy_name": "pure_momentum_phase0_cap_soxl08_tecl12_gross12",
             "lookback_days": 63,
             "top_n": 7,
             "rebalance_days": 7,
             "target_gross_leverage": 1.2,
-            "max_gross_leverage": 1.3,
+            "max_gross_leverage": 1.2,
             "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
-            "phase_sleeves": {"phase0_core": 0.85, "phase1_diversifier": 0.15},
+            "phase_sleeves": {"phase0_core": 1.0},
         }
     }
 
@@ -53,29 +52,28 @@ def test_forward_lock_passes_matching_profile() -> None:
 
 def test_forward_lock_blocks_changed_allocation() -> None:
     strategy = {
-        "name": "pure_momentum_cap_phase_blend_gross12_mid13",
+        "name": "pure_momentum_phase0_cap_soxl08_tecl12_gross12",
         "lookback_days": 63,
         "top_n": 7,
         "rebalance_days": 7,
         "target_gross_leverage": 1.2,
-        "max_gross_leverage": 1.3,
+        "max_gross_leverage": 1.2,
         "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
         "phase_sleeves": [
             {"name": "phase0_core", "allocation": 0.70},
-            {"name": "phase1_diversifier", "allocation": 0.30},
         ],
     }
     evidence = {
         "forward_lock": {
             "enabled": True,
-            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid13",
+            "strategy_name": "pure_momentum_phase0_cap_soxl08_tecl12_gross12",
             "lookback_days": 63,
             "top_n": 7,
             "rebalance_days": 7,
             "target_gross_leverage": 1.2,
-            "max_gross_leverage": 1.3,
+            "max_gross_leverage": 1.2,
             "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
-            "phase_sleeves": {"phase0_core": 0.85, "phase1_diversifier": 0.15},
+            "phase_sleeves": {"phase0_core": 1.0},
         }
     }
 
