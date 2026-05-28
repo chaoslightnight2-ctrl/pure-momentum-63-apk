@@ -1,8 +1,8 @@
 {
   "last_order_count": 70,
-  "last_rebalance_at_utc": "2026-05-27T19:21:53.977811+00:00",
-  "last_rebalance_date": "2026-05-26",
-  "last_rebalance_reason": "phase_sleeve_due",
+  "last_rebalance_at_utc": "2026-05-28T14:51:26.484487+00:00",
+  "last_rebalance_date": "2026-05-27",
+  "last_rebalance_reason": "forced",
   "last_selected_symbols": [
     "AMD",
     "MARA",
@@ -50,7 +50,7 @@
       "selection_mode": "normal_mid_breadth_spy20_top3_gross13",
       "spy20": 0.04952674859364481,
       "spy_dd63": 0.0,
-      "target_gross_override": 1.3,
+      "target_gross_override": 1.4,
       "target_weights": {
         "AMD": 0.8,
         "SOXL": 0.08000000000000002,
@@ -58,5 +58,5 @@
       }
     }
   },
-  "strategy": "pure_momentum_cap_phase_blend_gross12_mid13"
+  "strategy": "pure_momentum_cap_phase_blend_gross14_mid14"
 }
