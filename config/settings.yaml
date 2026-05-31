@@ -33,15 +33,6 @@ evidence:
         - QBTS
         - QUBT
         - ARQQ
-    regime_defense:
-      enabled: true
-      defensive_symbol: GLD
-      benchmark_symbol: SPY
-      confirmation_symbol: QQQ
-      ma_days: 200
-      momentum_days: 126
-      momentum_threshold: -0.10
-      target_gross: 1.0
   anomaly_guard:
     enabled: true
     max_completed_data_stale_days: 5
@@ -83,15 +74,6 @@ pure_momentum:
       - QBTS
       - QUBT
       - ARQQ
-  regime_defense:
-    enabled: true
-    defensive_symbol: GLD
-    benchmark_symbol: SPY
-    confirmation_symbol: QQQ
-    ma_days: 200
-    momentum_days: 126
-    momentum_threshold: -0.10
-    target_gross: 1.0
   symbol_weight_caps:
     SOXL: 0.08
     TECL: 0.12

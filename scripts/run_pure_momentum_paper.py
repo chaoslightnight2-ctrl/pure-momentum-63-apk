@@ -185,27 +185,6 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
         if actual_quantum != expected_quantum:
             mismatches.append({"field": "quantum_sleeve", "actual": actual_quantum, "locked": expected_quantum})
 
-    defense_cfg = strategy_cfg.get("regime_defense", {}) or {}
-    locked_defense = lock_cfg.get("regime_defense")
-    if locked_defense is not None:
-        fields = ["enabled", "defensive_symbol", "benchmark_symbol", "confirmation_symbol", "ma_days", "momentum_days", "momentum_threshold", "target_gross"]
-        actual_defense = {field: defense_cfg.get(field) for field in fields}
-        expected_defense = {field: locked_defense.get(field) for field in fields}
-        for field in ["enabled"]:
-            actual_defense[field] = bool(actual_defense[field])
-            expected_defense[field] = bool(expected_defense[field])
-        for field in ["defensive_symbol", "benchmark_symbol", "confirmation_symbol"]:
-            actual_defense[field] = str(actual_defense[field]).upper()
-            expected_defense[field] = str(expected_defense[field]).upper()
-        for field in ["ma_days", "momentum_days"]:
-            actual_defense[field] = int(actual_defense[field])
-            expected_defense[field] = int(expected_defense[field])
-        for field in ["momentum_threshold", "target_gross"]:
-            actual_defense[field] = round(float(actual_defense[field]), 6)
-            expected_defense[field] = round(float(expected_defense[field]), 6)
-        if actual_defense != expected_defense:
-            mismatches.append({"field": "regime_defense", "actual": actual_defense, "locked": expected_defense})
-
     return {
         "enabled": True,
         "passed": not mismatches,
@@ -791,74 +770,6 @@ def quantum_sleeve_targets(
     )
 
 
-def regime_defense_symbols(strategy_cfg: dict[str, Any]) -> list[str]:
-    defense_cfg = strategy_cfg.get("regime_defense", {}) or {}
-    if not bool(defense_cfg.get("enabled", False)):
-        return []
-    symbols = [
-        str(defense_cfg.get("defensive_symbol", "GLD")).upper(),
-        str(defense_cfg.get("benchmark_symbol", "SPY")).upper(),
-        str(defense_cfg.get("confirmation_symbol", "QQQ")).upper(),
-    ]
-    return sorted(set(symbols))
-
-
-def regime_defense_report(close: pd.DataFrame, strategy_cfg: dict[str, Any]) -> dict[str, Any]:
-    defense_cfg = strategy_cfg.get("regime_defense", {}) or {}
-    if not bool(defense_cfg.get("enabled", False)):
-        return {"enabled": False, "active": False}
-
-    defensive_symbol = str(defense_cfg.get("defensive_symbol", "GLD")).upper()
-    benchmark_symbol = str(defense_cfg.get("benchmark_symbol", "SPY")).upper()
-    confirmation_symbol = str(defense_cfg.get("confirmation_symbol", "QQQ")).upper()
-    ma_days = int(defense_cfg.get("ma_days", 200))
-    momentum_days = int(defense_cfg.get("momentum_days", 126))
-    momentum_threshold = float(defense_cfg.get("momentum_threshold", -0.10))
-    target_gross = float(defense_cfg.get("target_gross", 1.0))
-    required = [defensive_symbol, benchmark_symbol, confirmation_symbol]
-    missing = [symbol for symbol in required if symbol not in close.columns]
-    min_rows = max(ma_days, momentum_days) + 1
-    if missing or len(close) < min_rows:
-        return {
-            "enabled": True,
-            "active": False,
-            "reason": "insufficient_defense_data",
-            "missing_symbols": missing,
-            "required_rows": min_rows,
-            "available_rows": len(close),
-        }
-
-    benchmark = close[benchmark_symbol]
-    confirmation = close[confirmation_symbol]
-    benchmark_last = float(benchmark.iloc[-1])
-    confirmation_last = float(confirmation.iloc[-1])
-    benchmark_ma = float(benchmark.iloc[-ma_days:].mean())
-    confirmation_ma = float(confirmation.iloc[-ma_days:].mean())
-    benchmark_momentum = float(benchmark_last / benchmark.iloc[-momentum_days - 1] - 1.0)
-    active = (
-        benchmark_last < benchmark_ma
-        and confirmation_last < confirmation_ma
-        and benchmark_momentum < momentum_threshold
-    )
-    return {
-        "enabled": True,
-        "active": bool(active),
-        "mode": "all_in_defensive_symbol",
-        "defensive_symbol": defensive_symbol,
-        "target_gross": target_gross,
-        "benchmark_symbol": benchmark_symbol,
-        "confirmation_symbol": confirmation_symbol,
-        "ma_days": ma_days,
-        "momentum_days": momentum_days,
-        "momentum_threshold": momentum_threshold,
-        "benchmark_last": benchmark_last,
-        "benchmark_ma": benchmark_ma,
-        "confirmation_last": confirmation_last,
-        "confirmation_ma": confirmation_ma,
-        "benchmark_momentum": benchmark_momentum,
-    }
-
-
 def combined_phase_sleeve_targets(
     close: pd.DataFrame,
     strategy_cfg: dict[str, Any],
@@ -1343,10 +1254,9 @@ def main() -> None:
     evidence_cfg = config.get("evidence", {})
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
     quantum_symbols = quantum_sleeve_symbols(strategy_cfg)
-    defense_symbols = regime_defense_symbols(strategy_cfg)
     regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
-    data_symbols = sorted(set(symbols + quantum_symbols + defense_symbols + [regime_symbol]))
-    universe = set(symbols + quantum_symbols + [str((strategy_cfg.get("regime_defense", {}) or {}).get("defensive_symbol", "")).upper()])
+    data_symbols = sorted(set(symbols + quantum_symbols + [regime_symbol]))
+    universe = set(symbols + quantum_symbols)
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     rebalance_phase_lock = bool(strategy_cfg.get("rebalance_phase_lock", False))
@@ -1381,12 +1291,7 @@ def main() -> None:
         raise RuntimeError("Alpaca paper account is not active/tradable")
 
     clock = client.get_clock()
-    defense_cfg = strategy_cfg.get("regime_defense", {}) or {}
-    defense_lookback = max(
-        int(defense_cfg.get("ma_days", 0) or 0),
-        int(defense_cfg.get("momentum_days", 0) or 0),
-    )
-    close = fetch_close_frame(data_symbols, max(lookback_days, 63, defense_lookback))
+    close = fetch_close_frame(data_symbols, max(lookback_days, 63))
     anomaly_guard = anomaly_guard_report(close, data_symbols, evidence_cfg)
     if not anomaly_guard["passed"]:
         report = {
@@ -1400,11 +1305,8 @@ def main() -> None:
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
         print(json.dumps(report, indent=2))
         return
-    defense_report = regime_defense_report(close, strategy_cfg)
     selection = select_strategy_symbols(close, strategy_cfg, symbols)
     chosen = selection.symbols
-    if defense_report.get("active"):
-        chosen = [str(defense_report["defensive_symbol"])]
     if not clock.get("is_open"):
         report = {
             "status": "market_closed",
@@ -1416,7 +1318,6 @@ def main() -> None:
             "breadth20": selection.breadth20,
             "spy20": selection.spy20,
             "spy_dd63": selection.spy_dd63,
-            "regime_defense": defense_report,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -1569,12 +1470,7 @@ def main() -> None:
     quantum_sleeve_report: dict[str, Any] = {"enabled": False}
     target_exposures: dict[str, float] = {}
     target_qty: dict[str, int] = {}
-    if defense_report.get("active"):
-        active_target_gross = float(defense_report.get("target_gross", 1.0))
-        target_exposures = {str(defense_report["defensive_symbol"]): active_target_gross}
-        target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
-        plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
-    elif phase_sleeves_enabled:
+    if phase_sleeves_enabled:
         target_exposures, chosen, phase_sleeve_reports, phase_sleeves_state_updated = combined_phase_sleeve_targets(
             close,
             strategy_cfg,
@@ -1668,7 +1564,6 @@ def main() -> None:
         "phase_sleeves_enabled": phase_sleeves_enabled,
         "phase_sleeves": phase_sleeve_reports,
         "quantum_sleeve": quantum_sleeve_report,
-        "regime_defense": defense_report,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
