@@ -47,7 +47,7 @@
         "AMD",
         "TECL"
       ],
-      "selection_mode": "normal_mid_breadth_spy20_top3_gross13",
+      "selection_mode": "normal_mid_breadth_spy20_top3_gross1.2",
       "spy20": 0.04952674859364481,
       "spy_dd63": 0.0,
       "target_gross_override": 1.2,
@@ -58,5 +58,5 @@
       }
     }
   },
-  "strategy": "pure_momentum_cap_phase_blend_gross14_mid14"
+  "strategy": "pure_momentum_cap_phase_blend_gross12_mid12_quantum5"
 }

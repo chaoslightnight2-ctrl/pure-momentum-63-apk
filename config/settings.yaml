@@ -12,18 +12,27 @@ evidence:
   forward_lock:
     enabled: true
     locked_at_utc: "2026-05-28T15:05:00Z"
-    strategy_name: pure_momentum_cap_phase_blend_gross12_mid12
+    strategy_name: pure_momentum_cap_phase_blend_gross12_mid12_quantum5
     lookback_days: 63
     top_n: 7
     rebalance_days: 7
     target_gross_leverage: 1.2
     max_gross_leverage: 1.2
     phase_sleeves:
-      phase0_core: 0.85
-      phase1_diversifier: 0.15
+      phase0_core: 0.8075
+      phase1_diversifier: 0.1425
     symbol_weight_caps:
       SOXL: 0.08
       TECL: 0.12
+    quantum_sleeve:
+      enabled: true
+      allocation: 0.05
+      symbols:
+        - IONQ
+        - RGTI
+        - QBTS
+        - QUBT
+        - ARQQ
   anomaly_guard:
     enabled: true
     max_completed_data_stale_days: 5
@@ -35,7 +44,7 @@ evidence:
     max_open_orders_after_run: 0
 
 pure_momentum:
-  name: pure_momentum_cap_phase_blend_gross12_mid12
+  name: pure_momentum_cap_phase_blend_gross12_mid12_quantum5
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 7
@@ -51,10 +60,20 @@ pure_momentum:
   phase_sleeves:
     - name: phase0_core
       phase_offset: 0
-      allocation: 0.85
+      allocation: 0.8075
     - name: phase1_diversifier
       phase_offset: 1
-      allocation: 0.15
+      allocation: 0.1425
+  quantum_sleeve:
+    enabled: true
+    allocation: 0.05
+    mode: equal_weight_static
+    symbols:
+      - IONQ
+      - RGTI
+      - QBTS
+      - QUBT
+      - ARQQ
   symbol_weight_caps:
     SOXL: 0.08
     TECL: 0.12

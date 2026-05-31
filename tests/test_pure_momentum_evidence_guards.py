@@ -85,6 +85,53 @@ def test_forward_lock_blocks_changed_allocation() -> None:
     assert report["mismatches"][0]["field"] == "phase_sleeves"
 
 
+def test_forward_lock_checks_quantum_sleeve() -> None:
+    strategy = {
+        "name": "pure_momentum_cap_phase_blend_gross12_mid12_quantum5",
+        "lookback_days": 63,
+        "top_n": 7,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.2,
+        "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+        "phase_sleeves": [
+            {"name": "phase0_core", "allocation": 0.8075},
+            {"name": "phase1_diversifier", "allocation": 0.1425},
+        ],
+        "quantum_sleeve": {
+            "enabled": True,
+            "allocation": 0.05,
+            "symbols": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ"],
+        },
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid12_quantum5",
+            "lookback_days": 63,
+            "top_n": 7,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.2,
+            "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+            "phase_sleeves": {"phase0_core": 0.8075, "phase1_diversifier": 0.1425},
+            "quantum_sleeve": {
+                "enabled": True,
+                "allocation": 0.05,
+                "symbols": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ"],
+            },
+        }
+    }
+
+    report = forward_lock_report(strategy, evidence)
+
+    assert report["passed"] is True
+    strategy["quantum_sleeve"]["symbols"] = ["IONQ"]
+    report = forward_lock_report(strategy, evidence)
+    assert report["passed"] is False
+    assert report["mismatches"][0]["field"] == "quantum_sleeve"
+
+
 def test_anomaly_guard_blocks_absurd_latest_return() -> None:
     close = pd.DataFrame(
         {

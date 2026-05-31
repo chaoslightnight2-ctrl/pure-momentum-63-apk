@@ -169,6 +169,22 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
     if actual_sleeves != locked_sleeves:
         mismatches.append({"field": "phase_sleeves", "actual": actual_sleeves, "locked": locked_sleeves})
 
+    quantum_cfg = strategy_cfg.get("quantum_sleeve", {}) or {}
+    locked_quantum = lock_cfg.get("quantum_sleeve")
+    if locked_quantum is not None:
+        actual_quantum = {
+            "enabled": bool(quantum_cfg.get("enabled", False)),
+            "allocation": round(float(quantum_cfg.get("allocation", 0.0)), 6),
+            "symbols": sorted(str(symbol).upper() for symbol in (quantum_cfg.get("symbols") or [])),
+        }
+        expected_quantum = {
+            "enabled": bool(locked_quantum.get("enabled", False)),
+            "allocation": round(float(locked_quantum.get("allocation", 0.0)), 6),
+            "symbols": sorted(str(symbol).upper() for symbol in (locked_quantum.get("symbols") or [])),
+        }
+        if actual_quantum != expected_quantum:
+            mismatches.append({"field": "quantum_sleeve", "actual": actual_quantum, "locked": expected_quantum})
+
     return {
         "enabled": True,
         "passed": not mismatches,
@@ -468,7 +484,7 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     if mid_low <= breadth20 < mid_high and mid_sleeve_gross is not None and spy20 >= mid_sleeve_spy20_min:
         return selection_result(
             rank_symbols(close, universe, lookback_days, mid_sleeve_top_n, min_momentum),
-            "normal_mid_breadth_spy20_top3_gross13",
+            f"normal_mid_breadth_spy20_top{mid_sleeve_top_n}_gross{mid_sleeve_gross:g}",
             breadth20,
             spy20,
             spy_dd63,
@@ -708,6 +724,50 @@ def target_exposures_from_selection(
     if target_weights is None:
         target_weights = {symbol: 1.0 / len(selected) for symbol in selected}
     return {symbol: target_gross * float(target_weights.get(symbol, 0.0)) for symbol in selected}
+
+
+def quantum_sleeve_symbols(strategy_cfg: dict[str, Any]) -> list[str]:
+    sleeve_cfg = strategy_cfg.get("quantum_sleeve", {}) or {}
+    if not bool(sleeve_cfg.get("enabled", False)):
+        return []
+    return [str(symbol).upper() for symbol in (sleeve_cfg.get("symbols") or [])]
+
+
+def quantum_sleeve_targets(
+    close: pd.DataFrame,
+    strategy_cfg: dict[str, Any],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    sleeve_cfg = strategy_cfg.get("quantum_sleeve", {}) or {}
+    if not bool(sleeve_cfg.get("enabled", False)):
+        return {}, {"enabled": False}
+
+    allocation = float(sleeve_cfg.get("allocation", 0.0))
+    symbols = [symbol for symbol in quantum_sleeve_symbols(strategy_cfg) if symbol in close.columns]
+    mode = str(sleeve_cfg.get("mode", "equal_weight_static"))
+    if allocation <= 0.0 or not symbols:
+        return (
+            {},
+            {
+                "enabled": True,
+                "allocation": allocation,
+                "symbols": symbols,
+                "mode": mode,
+                "target_weights": {},
+            },
+        )
+
+    weight = 1.0 / len(symbols)
+    exposures = {symbol: allocation * weight for symbol in symbols}
+    return (
+        exposures,
+        {
+            "enabled": True,
+            "allocation": allocation,
+            "symbols": symbols,
+            "mode": mode,
+            "target_weights": {symbol: weight for symbol in symbols},
+        },
+    )
 
 
 def combined_phase_sleeve_targets(
@@ -1193,9 +1253,10 @@ def main() -> None:
     strategy_cfg = config.get("pure_momentum", {})
     evidence_cfg = config.get("evidence", {})
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
+    quantum_symbols = quantum_sleeve_symbols(strategy_cfg)
     regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
-    data_symbols = sorted(set(symbols + [regime_symbol]))
-    universe = set(symbols)
+    data_symbols = sorted(set(symbols + quantum_symbols + [regime_symbol]))
+    universe = set(symbols + quantum_symbols)
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     rebalance_phase_lock = bool(strategy_cfg.get("rebalance_phase_lock", False))
@@ -1406,6 +1467,7 @@ def main() -> None:
     active_target_gross = selection.target_gross_override if selection.target_gross_override is not None else target_gross
     phase_sleeve_reports: list[dict[str, Any]] = []
     phase_sleeves_state_updated = False
+    quantum_sleeve_report: dict[str, Any] = {"enabled": False}
     target_exposures: dict[str, float] = {}
     target_qty: dict[str, int] = {}
     if phase_sleeves_enabled:
@@ -1420,13 +1482,22 @@ def main() -> None:
             phase_status.get("phase_offset"),
             bool(args.force_rebalance),
         )
+        quantum_exposures, quantum_sleeve_report = quantum_sleeve_targets(close, strategy_cfg)
+        for symbol, exposure in quantum_exposures.items():
+            target_exposures[symbol] = target_exposures.get(symbol, 0.0) + exposure
+        chosen = sorted(set(chosen) | set(quantum_exposures))
         active_target_gross = sum(target_exposures.values())
         target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
         plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
     else:
         target_exposures = target_exposures_from_selection(chosen, active_target_gross, selection.target_weights)
+        quantum_exposures, quantum_sleeve_report = quantum_sleeve_targets(close, strategy_cfg)
+        for symbol, exposure in quantum_exposures.items():
+            target_exposures[symbol] = target_exposures.get(symbol, 0.0) + exposure
+        chosen = sorted(set(chosen) | set(quantum_exposures))
+        active_target_gross = sum(target_exposures.values())
         target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
-        plans = build_plan(close, chosen, current_qty, equity, active_target_gross, max_gross, selection.target_weights)
+        plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
     if args.buy_only_rebalance:
         plans = [plan for plan in plans if plan.side == "buy"]
     daily_loss_blocked_buys = should_block_new_buys(account)
@@ -1492,6 +1563,7 @@ def main() -> None:
         "target_qty": target_qty,
         "phase_sleeves_enabled": phase_sleeves_enabled,
         "phase_sleeves": phase_sleeve_reports,
+        "quantum_sleeve": quantum_sleeve_report,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
