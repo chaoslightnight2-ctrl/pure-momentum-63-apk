@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from scripts.run_pure_momentum_paper import (
     cap_buy_to_current_buying_power,
     execution_drift_report,
     forward_lock_report,
+    regime_defense_report,
+    regime_defense_symbols,
+    stateful_regime_signal,
 )
 
 
@@ -130,6 +134,108 @@ def test_forward_lock_checks_quantum_sleeve() -> None:
     report = forward_lock_report(strategy, evidence)
     assert report["passed"] is False
     assert report["mismatches"][0]["field"] == "quantum_sleeve"
+
+
+def test_forward_lock_checks_regime_defense_guard() -> None:
+    strategy = {
+        "name": "pure_momentum_cap_phase_blend_gross12_mid12_quantum5_pfix_stateful_guard",
+        "lookback_days": 63,
+        "top_n": 7,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.2,
+        "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+        "phase_sleeves": [
+            {"name": "phase0_core", "allocation": 0.8075},
+            {"name": "phase1_diversifier", "allocation": 0.1425},
+        ],
+        "regime_defense_guard": {
+            "enabled": True,
+            "name": "stateful_2022_pfix_guard",
+            "defense_symbol": "PFIX",
+            "defense_exposure": 1.0,
+            "entry_signal": "early_score2_macro",
+            "exit_signal": "bear_score_low",
+            "min_hold_days": 10,
+            "max_hold_days": 90,
+            "cooldown_days": 10,
+        },
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid12_quantum5_pfix_stateful_guard",
+            "lookback_days": 63,
+            "top_n": 7,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.2,
+            "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+            "phase_sleeves": {"phase0_core": 0.8075, "phase1_diversifier": 0.1425},
+            "regime_defense_guard": copy.deepcopy(strategy["regime_defense_guard"]),
+        }
+    }
+
+    report = forward_lock_report(strategy, evidence)
+
+    assert report["passed"] is True
+    strategy["regime_defense_guard"]["defense_exposure"] = 0.75
+    report = forward_lock_report(strategy, evidence)
+    assert report["passed"] is False
+    assert report["mismatches"][0]["field"] == "regime_defense_guard"
+
+
+def test_regime_defense_symbols_include_market_data_and_defense_symbol() -> None:
+    symbols = regime_defense_symbols(
+        {
+            "regime_defense_guard": {
+                "enabled": True,
+                "defense_symbol": "PFIX",
+                "market_symbols": ["SPY", "QQQ", "TLT", "UUP", "^VIX"],
+            }
+        }
+    )
+
+    assert "PFIX" in symbols
+    assert "QQQ" in symbols
+    assert "^VIX" in symbols
+
+
+def test_stateful_regime_signal_respects_hold_exit_and_cooldown() -> None:
+    idx = pd.date_range("2022-01-01", periods=8, freq="D")
+    entry = pd.Series([True, True, False, False, True, True, True, False], index=idx)
+    exit_signal = pd.Series([False, True, True, True, False, False, True, True], index=idx)
+
+    state = stateful_regime_signal(entry, exit_signal, min_hold_days=2, max_hold_days=4, cooldown_days=2)
+
+    assert state.tolist() == [True, False, False, False, True, True, False, False]
+
+
+def test_regime_defense_report_activates_on_2022_like_features() -> None:
+    idx = pd.date_range("2021-01-01", periods=300, freq="D")
+    close = pd.DataFrame(index=idx)
+    close["SPY"] = list(pd.Series(range(300), index=idx).map(lambda x: 500 - x * 0.9))
+    close["QQQ"] = list(pd.Series(range(300), index=idx).map(lambda x: 400 - x * 1.0))
+    close["TLT"] = list(pd.Series(range(300), index=idx).map(lambda x: 160 - x * 0.25))
+    close["UUP"] = list(pd.Series(range(300), index=idx).map(lambda x: 24 + x * 0.03))
+    close["^VIX"] = list(pd.Series(range(300), index=idx).map(lambda x: 18 + x * 0.03))
+    cfg = {
+        "regime_defense_guard": {
+            "enabled": True,
+            "defense_symbol": "PFIX",
+            "defense_exposure": 1.0,
+            "entry_signal": "early_score2_macro",
+            "exit_signal": "bear_score_low",
+            "min_hold_days": 10,
+            "max_hold_days": 90,
+            "cooldown_days": 10,
+        }
+    }
+
+    report = regime_defense_report(close, cfg)
+
+    assert report["active"] is True
+    assert report["defense_symbol"] == "PFIX"
 
 
 def test_anomaly_guard_blocks_absurd_latest_return() -> None:

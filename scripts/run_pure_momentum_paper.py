@@ -185,11 +185,33 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
         if actual_quantum != expected_quantum:
             mismatches.append({"field": "quantum_sleeve", "actual": actual_quantum, "locked": expected_quantum})
 
+    defense_cfg = strategy_cfg.get("regime_defense_guard", {}) or {}
+    locked_defense = lock_cfg.get("regime_defense_guard")
+    if locked_defense is not None:
+        actual_defense = normalize_regime_defense_guard_for_lock(defense_cfg)
+        expected_defense = normalize_regime_defense_guard_for_lock(locked_defense)
+        if actual_defense != expected_defense:
+            mismatches.append({"field": "regime_defense_guard", "actual": actual_defense, "locked": expected_defense})
+
     return {
         "enabled": True,
         "passed": not mismatches,
         "locked_at_utc": lock_cfg.get("locked_at_utc"),
         "mismatches": mismatches,
+    }
+
+
+def normalize_regime_defense_guard_for_lock(guard_cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(guard_cfg.get("enabled", False)),
+        "name": str(guard_cfg.get("name", "")),
+        "defense_symbol": str(guard_cfg.get("defense_symbol", "")).upper(),
+        "defense_exposure": round(float(guard_cfg.get("defense_exposure", 0.0)), 6),
+        "entry_signal": str(guard_cfg.get("entry_signal", "")),
+        "exit_signal": str(guard_cfg.get("exit_signal", "")),
+        "min_hold_days": int(guard_cfg.get("min_hold_days", 0)),
+        "max_hold_days": int(guard_cfg.get("max_hold_days", 0)),
+        "cooldown_days": int(guard_cfg.get("cooldown_days", 0)),
     }
 
 
@@ -539,6 +561,144 @@ def is_rebalance_due(
     if days_since >= max(rebalance_days, 1):
         return True, "rebalance_interval_due", days_since
     return False, "rebalance_interval_wait", days_since
+
+
+def regime_defense_symbols(strategy_cfg: dict[str, Any]) -> list[str]:
+    guard_cfg = strategy_cfg.get("regime_defense_guard", {}) or {}
+    if not bool(guard_cfg.get("enabled", False)):
+        return []
+    symbols = [str(guard_cfg.get("defense_symbol", "")).upper()]
+    symbols.extend(str(symbol).upper() for symbol in (guard_cfg.get("market_symbols") or []))
+    return sorted(symbol for symbol in set(symbols) if symbol)
+
+
+def regime_defense_features(close: pd.DataFrame) -> pd.DataFrame:
+    required = ["SPY", "QQQ", "TLT", "UUP"]
+    missing = [symbol for symbol in required if symbol not in close.columns]
+    if missing:
+        raise RuntimeError(f"Regime defense guard missing market data columns: {missing}")
+    spy = close["SPY"]
+    qqq = close["QQQ"]
+    tlt = close["TLT"]
+    uup = close["UUP"]
+    vix = close["^VIX"] if "^VIX" in close.columns else pd.Series(float("nan"), index=close.index)
+    features = pd.DataFrame(index=close.index)
+    features["spy_ma100"] = spy.rolling(100).mean()
+    features["spy_ma200"] = spy.rolling(200).mean()
+    features["qqq_ma50"] = qqq.rolling(50).mean()
+    features["qqq_ma100"] = qqq.rolling(100).mean()
+    features["qqq_ma200"] = qqq.rolling(200).mean()
+    features["spy_ret126"] = spy / spy.shift(126) - 1.0
+    features["qqq_ret42"] = qqq / qqq.shift(42) - 1.0
+    features["qqq_ret126"] = qqq / qqq.shift(126) - 1.0
+    features["tlt_ret63"] = tlt / tlt.shift(63) - 1.0
+    features["uup_ret63"] = uup / uup.shift(63) - 1.0
+    features["qqq_dd126"] = qqq / qqq.rolling(126).max() - 1.0
+    features["qqq_dd252"] = qqq / qqq.rolling(252).max() - 1.0
+    features["vix_ma20"] = vix.rolling(20).mean()
+    features["spy"] = spy
+    features["qqq"] = qqq
+    features["vix"] = vix
+    features["bear_score"] = (
+        (spy < features["spy_ma200"]).astype(int)
+        + (qqq < features["qqq_ma200"]).astype(int)
+        + (features["spy_ret126"] < -0.08).astype(int)
+        + (features["qqq_ret126"] < -0.12).astype(int)
+        + (features["qqq_dd252"] < -0.18).astype(int)
+        + ((features["tlt_ret63"] < -0.04) & (features["uup_ret63"] > 0.02)).astype(int)
+    )
+    features["early_score"] = (
+        (spy < features["spy_ma100"]).astype(int)
+        + (qqq < features["qqq_ma100"]).astype(int)
+        + (features["qqq_ret42"] < -0.08).astype(int)
+        + (features["qqq_dd126"] < -0.12).astype(int)
+        + (vix > features["vix_ma20"] * 1.15).astype(int)
+    )
+    return features
+
+
+def regime_defense_entry_signal(features: pd.DataFrame, name: str) -> pd.Series:
+    if name == "early_score2_macro":
+        return (features["early_score"] >= 2) & (features["tlt_ret63"] < -0.03) & (features["uup_ret63"] > 0.01)
+    raise ValueError(f"Unsupported regime defense entry signal: {name}")
+
+
+def regime_defense_exit_signal(features: pd.DataFrame, name: str) -> pd.Series:
+    if name == "bear_score_low":
+        return features["bear_score"] <= 1
+    raise ValueError(f"Unsupported regime defense exit signal: {name}")
+
+
+def stateful_regime_signal(
+    entry: pd.Series,
+    exit_signal: pd.Series,
+    min_hold_days: int,
+    max_hold_days: int,
+    cooldown_days: int,
+) -> pd.Series:
+    entry = entry.fillna(False).astype(bool)
+    exit_signal = exit_signal.fillna(False).astype(bool)
+    active_values: list[bool] = []
+    in_regime = False
+    hold_days = 0
+    cooldown = 0
+    for date in entry.index:
+        if cooldown > 0:
+            cooldown -= 1
+        if in_regime:
+            hold_days += 1
+            should_exit = hold_days >= min_hold_days and bool(exit_signal.loc[date])
+            if max_hold_days > 0 and hold_days >= max_hold_days:
+                should_exit = True
+            if should_exit:
+                in_regime = False
+                hold_days = 0
+                cooldown = max(cooldown_days, 0)
+        elif cooldown == 0 and bool(entry.loc[date]):
+            in_regime = True
+            hold_days = 1
+        active_values.append(in_regime)
+    return pd.Series(active_values, index=entry.index)
+
+
+def regime_defense_report(close: pd.DataFrame, strategy_cfg: dict[str, Any]) -> dict[str, Any]:
+    guard_cfg = strategy_cfg.get("regime_defense_guard", {}) or {}
+    if not bool(guard_cfg.get("enabled", False)):
+        return {"enabled": False, "active": False}
+    features = regime_defense_features(close)
+    entry_name = str(guard_cfg.get("entry_signal", "early_score2_macro"))
+    exit_name = str(guard_cfg.get("exit_signal", "bear_score_low"))
+    entry = regime_defense_entry_signal(features, entry_name)
+    exit_signal = regime_defense_exit_signal(features, exit_name)
+    min_hold_days = int(guard_cfg.get("min_hold_days", 10))
+    max_hold_days = int(guard_cfg.get("max_hold_days", 90))
+    cooldown_days = int(guard_cfg.get("cooldown_days", 10))
+    state = stateful_regime_signal(entry, exit_signal, min_hold_days, max_hold_days, cooldown_days)
+    latest = features.iloc[-1]
+    active = bool(state.iloc[-1])
+    active_prev = bool(state.iloc[-2]) if len(state) > 1 else False
+    return {
+        "enabled": True,
+        "name": str(guard_cfg.get("name", "stateful_2022_pfix_guard")),
+        "active": active,
+        "active_previous_completed_day": active_prev,
+        "latest_completed_date": close.index[-1].date().isoformat(),
+        "defense_symbol": str(guard_cfg.get("defense_symbol", "PFIX")).upper(),
+        "defense_exposure": float(guard_cfg.get("defense_exposure", 1.0)),
+        "entry_signal": entry_name,
+        "exit_signal": exit_name,
+        "entry_now": bool(entry.iloc[-1]),
+        "exit_now": bool(exit_signal.iloc[-1]),
+        "min_hold_days": min_hold_days,
+        "max_hold_days": max_hold_days,
+        "cooldown_days": cooldown_days,
+        "early_score": int(latest["early_score"]) if pd.notna(latest["early_score"]) else None,
+        "bear_score": int(latest["bear_score"]) if pd.notna(latest["bear_score"]) else None,
+        "tlt_ret63": as_float(latest.get("tlt_ret63"), float("nan")),
+        "uup_ret63": as_float(latest.get("uup_ret63"), float("nan")),
+        "qqq_ret42": as_float(latest.get("qqq_ret42"), float("nan")),
+        "qqq_dd126": as_float(latest.get("qqq_dd126"), float("nan")),
+    }
 
 
 def rebalance_phase_status(
@@ -1254,9 +1414,10 @@ def main() -> None:
     evidence_cfg = config.get("evidence", {})
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
     quantum_symbols = quantum_sleeve_symbols(strategy_cfg)
+    defense_symbols = regime_defense_symbols(strategy_cfg)
     regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
-    data_symbols = sorted(set(symbols + quantum_symbols + [regime_symbol]))
-    universe = set(symbols + quantum_symbols)
+    data_symbols = sorted(set(symbols + quantum_symbols + defense_symbols + [regime_symbol]))
+    universe = set(symbols + quantum_symbols + [symbol for symbol in defense_symbols if not symbol.startswith("^")])
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
     rebalance_phase_lock = bool(strategy_cfg.get("rebalance_phase_lock", False))
@@ -1291,7 +1452,7 @@ def main() -> None:
         raise RuntimeError("Alpaca paper account is not active/tradable")
 
     clock = client.get_clock()
-    close = fetch_close_frame(data_symbols, max(lookback_days, 63))
+    close = fetch_close_frame(data_symbols, max(lookback_days, 252))
     anomaly_guard = anomaly_guard_report(close, data_symbols, evidence_cfg)
     if not anomaly_guard["passed"]:
         report = {
@@ -1306,6 +1467,7 @@ def main() -> None:
         print(json.dumps(report, indent=2))
         return
     selection = select_strategy_symbols(close, strategy_cfg, symbols)
+    defense_guard = regime_defense_report(close, strategy_cfg)
     chosen = selection.symbols
     if not clock.get("is_open"):
         report = {
@@ -1318,6 +1480,7 @@ def main() -> None:
             "breadth20": selection.breadth20,
             "spy20": selection.spy20,
             "spy_dd63": selection.spy_dd63,
+            "regime_defense_guard": defense_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -1328,6 +1491,14 @@ def main() -> None:
     positions = client.get_positions()
     current_qty = managed_positions(positions, universe)
     due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
+    defense_symbol = str(defense_guard.get("defense_symbol", "")).upper()
+    defense_position_active = bool(defense_symbol and current_qty.get(defense_symbol))
+    if defense_guard.get("active") and current_qty != {defense_symbol: current_qty.get(defense_symbol, 0)}:
+        due = True
+        due_reason = "regime_defense_entry"
+    elif defense_position_active and not defense_guard.get("active"):
+        due = True
+        due_reason = "regime_defense_exit"
     phase_days_elapsed = (
         trading_days_since(close, rebalance_phase_anchor_date)
         if rebalance_phase_anchor_date
@@ -1375,6 +1546,7 @@ def main() -> None:
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+            "regime_defense_guard": defense_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1400,6 +1572,7 @@ def main() -> None:
             "phase_sleeve_offsets": sorted(phase_sleeve_offsets),
             "rebalance_due_reason": due_reason,
             "force_rebalance": bool(args.force_rebalance),
+            "regime_defense_guard": defense_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1417,6 +1590,7 @@ def main() -> None:
             "trading_days_since_rebalance": trading_days_elapsed,
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
+            "regime_defense_guard": defense_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1470,7 +1644,14 @@ def main() -> None:
     quantum_sleeve_report: dict[str, Any] = {"enabled": False}
     target_exposures: dict[str, float] = {}
     target_qty: dict[str, int] = {}
-    if phase_sleeves_enabled:
+    if defense_guard.get("active"):
+        defense_symbol = str(defense_guard["defense_symbol"]).upper()
+        target_exposures = {defense_symbol: float(defense_guard.get("defense_exposure", 1.0))}
+        chosen = [defense_symbol]
+        active_target_gross = sum(target_exposures.values())
+        target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
+        plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
+    elif phase_sleeves_enabled:
         target_exposures, chosen, phase_sleeve_reports, phase_sleeves_state_updated = combined_phase_sleeve_targets(
             close,
             strategy_cfg,
@@ -1564,6 +1745,7 @@ def main() -> None:
         "phase_sleeves_enabled": phase_sleeves_enabled,
         "phase_sleeves": phase_sleeve_reports,
         "quantum_sleeve": quantum_sleeve_report,
+        "regime_defense_guard": defense_guard,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
