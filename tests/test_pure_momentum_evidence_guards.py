@@ -14,6 +14,7 @@ from scripts.run_pure_momentum_paper import (
     cap_buy_to_current_buying_power,
     execution_drift_report,
     forward_lock_report,
+    regime_defense_report,
 )
 
 
@@ -130,6 +131,36 @@ def test_forward_lock_checks_quantum_sleeve() -> None:
     report = forward_lock_report(strategy, evidence)
     assert report["passed"] is False
     assert report["mismatches"][0]["field"] == "quantum_sleeve"
+
+
+def test_regime_defense_activates_only_hard_bear_regime() -> None:
+    dates = pd.bdate_range("2025-01-01", periods=220)
+    close = pd.DataFrame(
+        {
+            "SPY": [500.0] * 94 + [440.0] * 126,
+            "QQQ": [400.0] * 94 + [340.0] * 126,
+            "GLD": [200.0] * 220,
+        },
+        index=dates,
+    )
+    strategy = {
+        "regime_defense": {
+            "enabled": True,
+            "defensive_symbol": "GLD",
+            "benchmark_symbol": "SPY",
+            "confirmation_symbol": "QQQ",
+            "ma_days": 200,
+            "momentum_days": 126,
+            "momentum_threshold": -0.10,
+            "target_gross": 1.0,
+        }
+    }
+
+    report = regime_defense_report(close, strategy)
+
+    assert report["active"] is True
+    assert report["defensive_symbol"] == "GLD"
+    assert report["target_gross"] == 1.0
 
 
 def test_anomaly_guard_blocks_absurd_latest_return() -> None:
