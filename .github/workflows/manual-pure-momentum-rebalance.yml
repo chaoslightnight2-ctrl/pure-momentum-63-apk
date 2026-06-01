@@ -1,0 +1,124 @@
+name: Manual Pure Momentum Rebalance
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute_orders:
+        description: "Submit paper orders. Keep false for dry-run verification."
+        required: true
+        type: boolean
+        default: false
+      force_rebalance:
+        description: "Run a rebalance even when the normal 7-trading-day gate is not due."
+        required: true
+        type: boolean
+        default: true
+      buy_only_rebalance:
+        description: "Submit only buy orders toward current targets; do not flatten or sell."
+        required: true
+        type: boolean
+        default: false
+      ignore_phase_lock:
+        description: "Emergency override for rebalance phase lock."
+        required: true
+        type: boolean
+        default: false
+      ignore_daily_loss_block:
+        description: "Paper-only manual override for the daily loss buy block."
+        required: true
+        type: boolean
+        default: false
+      buy_submission_rounds_override:
+        description: "Optional manual override for proportional buy rounds."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pure-momentum-paper-orders
+  cancel-in-progress: false
+
+jobs:
+  manual-rebalance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Istanbul
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile paper runner
+        run: |
+          python -m py_compile scripts/run_pure_momentum_paper.py src/trading/alpaca_paper.py src/utils/io_utils.py
+
+      - name: Run focused guard tests
+        run: |
+          python -m pytest tests/test_pure_momentum_evidence_guards.py
+
+      - name: Run manual rebalance
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${{ inputs.execute_orders }}" = "true" ]; then
+            ARGS+=("--execute")
+          fi
+          if [ "${{ inputs.force_rebalance }}" = "true" ]; then
+            ARGS+=("--force-rebalance")
+          fi
+          if [ "${{ inputs.buy_only_rebalance }}" = "true" ]; then
+            ARGS+=("--buy-only-rebalance")
+          fi
+          if [ "${{ inputs.ignore_phase_lock }}" = "true" ]; then
+            ARGS+=("--ignore-phase-lock")
+          fi
+          if [ "${{ inputs.ignore_daily_loss_block }}" = "true" ]; then
+            ARGS+=("--ignore-daily-loss-block")
+          fi
+          if [ -n "${{ inputs.buy_submission_rounds_override }}" ]; then
+            ARGS+=("--buy-submission-rounds-override" "${{ inputs.buy_submission_rounds_override }}")
+          fi
+          python scripts/run_pure_momentum_paper.py \
+            --config config/settings.yaml \
+            --state-path state/pure_momentum_state.json \
+            "${ARGS[@]}"
+
+      - name: Commit rebalance state
+        shell: bash
+        run: |
+          if git diff --quiet -- state/pure_momentum_state.json; then
+            echo "No rebalance state change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/pure_momentum_state.json
+          git commit -m "Update pure momentum rebalance state"
+          git pull --rebase
+          git push
+
+      - name: Upload manual rebalance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-pure-momentum-rebalance-run
+          path: reports/pure_momentum_paper_run.json
+          if-no-files-found: ignore

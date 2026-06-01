@@ -15,6 +15,9 @@ from scripts.run_pure_momentum_paper import (
     cap_buy_to_current_buying_power,
     execution_drift_report,
     forward_lock_report,
+    apply_partial_defense_overlay,
+    apply_quantum_sleeve_defense,
+    partial_defense_report,
     regime_defense_report,
     regime_defense_symbols,
     stateful_regime_signal,
@@ -106,6 +109,12 @@ def test_forward_lock_checks_quantum_sleeve() -> None:
             "enabled": True,
             "allocation": 0.05,
             "symbols": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ"],
+            "defense_guard": {
+                "enabled": True,
+                "name": "quantum_to_bil_on_breadth33_qdd8",
+                "defense_symbol": "BIL",
+                "trigger": "partial_defense_active",
+            },
         },
     }
     evidence = {
@@ -123,6 +132,12 @@ def test_forward_lock_checks_quantum_sleeve() -> None:
                 "enabled": True,
                 "allocation": 0.05,
                 "symbols": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ"],
+                "defense_guard": {
+                    "enabled": True,
+                    "name": "quantum_to_bil_on_breadth33_qdd8",
+                    "defense_symbol": "BIL",
+                    "trigger": "partial_defense_active",
+                },
             },
         }
     }
@@ -185,6 +200,44 @@ def test_forward_lock_checks_regime_defense_guard() -> None:
     assert report["mismatches"][0]["field"] == "regime_defense_guard"
 
 
+def test_forward_lock_checks_partial_defense_guard() -> None:
+    strategy = {
+        "name": "pure_momentum_partial_bil50_guard",
+        "lookback_days": 63,
+        "top_n": 5,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.2,
+        "partial_defense_guard": {
+            "enabled": True,
+            "name": "breadth33_qdd8_bil50",
+            "defense_symbol": "BIL",
+            "defense_weight": 0.5,
+            "signal": "breadth33_qdd8",
+            "hold_days": 3,
+            "cooldown_days": 5,
+        },
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_partial_bil50_guard",
+            "lookback_days": 63,
+            "top_n": 5,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.2,
+            "partial_defense_guard": copy.deepcopy(strategy["partial_defense_guard"]),
+        }
+    }
+
+    assert forward_lock_report(strategy, evidence)["passed"] is True
+    strategy["partial_defense_guard"]["defense_weight"] = 0.25
+    report = forward_lock_report(strategy, evidence)
+    assert report["passed"] is False
+    assert report["mismatches"][0]["field"] == "partial_defense_guard"
+
+
 def test_regime_defense_symbols_include_market_data_and_defense_symbol() -> None:
     symbols = regime_defense_symbols(
         {
@@ -199,6 +252,21 @@ def test_regime_defense_symbols_include_market_data_and_defense_symbol() -> None
     assert "PFIX" in symbols
     assert "QQQ" in symbols
     assert "^VIX" in symbols
+
+
+def test_regime_defense_symbols_include_partial_defense_symbol() -> None:
+    symbols = regime_defense_symbols(
+        {
+            "partial_defense_guard": {
+                "enabled": True,
+                "defense_symbol": "BIL",
+                "market_symbols": ["QQQ"],
+            }
+        }
+    )
+
+    assert "BIL" in symbols
+    assert "QQQ" in symbols
 
 
 def test_stateful_regime_signal_respects_hold_exit_and_cooldown() -> None:
@@ -236,6 +304,62 @@ def test_regime_defense_report_activates_on_2022_like_features() -> None:
 
     assert report["active"] is True
     assert report["defense_symbol"] == "PFIX"
+
+
+def test_partial_defense_report_activates_on_breadth_drawdown() -> None:
+    idx = pd.date_range("2024-01-01", periods=90, freq="D")
+    close = pd.DataFrame(index=idx)
+    close["QQQ"] = [100.0] * 87 + [91.0] * 3
+    close["AAA"] = [100.0] * 87 + [90.0] * 3
+    close["BBB"] = [100.0] * 87 + [89.0] * 3
+    close["CCC"] = [100.0] * 87 + [88.0] * 3
+    cfg = {
+        "partial_defense_guard": {
+            "enabled": True,
+            "name": "breadth33_qdd8_bil50",
+            "defense_symbol": "BIL",
+            "defense_weight": 0.5,
+            "signal": "breadth33_qdd8",
+            "hold_days": 3,
+            "cooldown_days": 5,
+        }
+    }
+
+    report = partial_defense_report(close, cfg, ["AAA", "BBB", "CCC"])
+
+    assert report["active"] is True
+    assert report["defense_symbol"] == "BIL"
+    assert report["defense_weight"] == 0.5
+
+
+def test_apply_partial_defense_overlay_scales_targets() -> None:
+    adjusted = apply_partial_defense_overlay(
+        {"AAA": 0.6, "BBB": 0.6},
+        {"active": True, "defense_symbol": "BIL", "defense_weight": 0.5},
+    )
+
+    assert adjusted == {"AAA": 0.3, "BBB": 0.3, "BIL": 0.5}
+
+
+def test_apply_quantum_sleeve_defense_replaces_quantum_when_partial_active() -> None:
+    exposures, report = apply_quantum_sleeve_defense(
+        {"IONQ": 0.01, "RGTI": 0.01, "QBTS": 0.01, "QUBT": 0.01, "ARQQ": 0.01},
+        {"enabled": True, "allocation": 0.05},
+        {"active": True},
+        {
+            "quantum_sleeve": {
+                "defense_guard": {
+                    "enabled": True,
+                    "name": "quantum_to_bil_on_breadth33_qdd8",
+                    "defense_symbol": "BIL",
+                    "trigger": "partial_defense_active",
+                }
+            }
+        },
+    )
+
+    assert exposures == {"BIL": 0.05}
+    assert report["defense_guard"]["active"] is True
 
 
 def test_anomaly_guard_blocks_absurd_latest_return() -> None:

@@ -11,8 +11,8 @@ reports:
 evidence:
   forward_lock:
     enabled: true
-    locked_at_utc: "2026-06-01T11:07:19Z"
-    strategy_name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_stateful_guard
+    locked_at_utc: "2026-06-01T12:09:00Z"
+    strategy_name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_partial_bil50_guard
     lookback_days: 63
     top_n: 5
     rebalance_days: 7
@@ -33,6 +33,11 @@ evidence:
         - QBTS
         - QUBT
         - ARQQ
+      defense_guard:
+        enabled: true
+        name: quantum_to_bil_on_breadth33_qdd8
+        defense_symbol: BIL
+        trigger: partial_defense_active
     regime_defense_guard:
       enabled: true
       name: stateful_2022_pfix_guard
@@ -43,6 +48,14 @@ evidence:
       min_hold_days: 10
       max_hold_days: 90
       cooldown_days: 10
+    partial_defense_guard:
+      enabled: true
+      name: breadth33_qdd8_bil50
+      defense_symbol: BIL
+      defense_weight: 0.50
+      signal: breadth33_qdd8
+      hold_days: 3
+      cooldown_days: 5
   anomaly_guard:
     enabled: true
     max_completed_data_stale_days: 5
@@ -54,7 +67,7 @@ evidence:
     max_open_orders_after_run: 0
 
 pure_momentum:
-  name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_stateful_guard
+  name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_partial_bil50_guard
   backtest_start: "2023-04-25"
   lookback_days: 63
   top_n: 5
@@ -84,6 +97,11 @@ pure_momentum:
       - QBTS
       - QUBT
       - ARQQ
+    defense_guard:
+      enabled: true
+      name: quantum_to_bil_on_breadth33_qdd8
+      defense_symbol: BIL
+      trigger: partial_defense_active
   regime_defense_guard:
     enabled: true
     name: stateful_2022_pfix_guard
@@ -100,6 +118,16 @@ pure_momentum:
       - TLT
       - UUP
       - ^VIX
+  partial_defense_guard:
+    enabled: true
+    name: breadth33_qdd8_bil50
+    defense_symbol: BIL
+    defense_weight: 0.50
+    signal: breadth33_qdd8
+    hold_days: 3
+    cooldown_days: 5
+    market_symbols:
+      - QQQ
   symbol_weight_caps:
     SOXL: 0.08
     TECL: 0.12

@@ -172,16 +172,8 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
     quantum_cfg = strategy_cfg.get("quantum_sleeve", {}) or {}
     locked_quantum = lock_cfg.get("quantum_sleeve")
     if locked_quantum is not None:
-        actual_quantum = {
-            "enabled": bool(quantum_cfg.get("enabled", False)),
-            "allocation": round(float(quantum_cfg.get("allocation", 0.0)), 6),
-            "symbols": sorted(str(symbol).upper() for symbol in (quantum_cfg.get("symbols") or [])),
-        }
-        expected_quantum = {
-            "enabled": bool(locked_quantum.get("enabled", False)),
-            "allocation": round(float(locked_quantum.get("allocation", 0.0)), 6),
-            "symbols": sorted(str(symbol).upper() for symbol in (locked_quantum.get("symbols") or [])),
-        }
+        actual_quantum = normalize_quantum_sleeve_for_lock(quantum_cfg, locked_quantum)
+        expected_quantum = normalize_quantum_sleeve_for_lock(locked_quantum, locked_quantum)
         if actual_quantum != expected_quantum:
             mismatches.append({"field": "quantum_sleeve", "actual": actual_quantum, "locked": expected_quantum})
 
@@ -192,6 +184,16 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
         expected_defense = normalize_regime_defense_guard_for_lock(locked_defense)
         if actual_defense != expected_defense:
             mismatches.append({"field": "regime_defense_guard", "actual": actual_defense, "locked": expected_defense})
+
+    partial_defense_cfg = strategy_cfg.get("partial_defense_guard", {}) or {}
+    locked_partial_defense = lock_cfg.get("partial_defense_guard")
+    if locked_partial_defense is not None:
+        actual_partial_defense = normalize_partial_defense_guard_for_lock(partial_defense_cfg)
+        expected_partial_defense = normalize_partial_defense_guard_for_lock(locked_partial_defense)
+        if actual_partial_defense != expected_partial_defense:
+            mismatches.append(
+                {"field": "partial_defense_guard", "actual": actual_partial_defense, "locked": expected_partial_defense}
+            )
 
     return {
         "enabled": True,
@@ -211,6 +213,35 @@ def normalize_regime_defense_guard_for_lock(guard_cfg: dict[str, Any]) -> dict[s
         "exit_signal": str(guard_cfg.get("exit_signal", "")),
         "min_hold_days": int(guard_cfg.get("min_hold_days", 0)),
         "max_hold_days": int(guard_cfg.get("max_hold_days", 0)),
+        "cooldown_days": int(guard_cfg.get("cooldown_days", 0)),
+    }
+
+
+def normalize_quantum_sleeve_for_lock(sleeve_cfg: dict[str, Any], locked_cfg: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "enabled": bool(sleeve_cfg.get("enabled", False)),
+        "allocation": round(float(sleeve_cfg.get("allocation", 0.0)), 6),
+        "symbols": sorted(str(symbol).upper() for symbol in (sleeve_cfg.get("symbols") or [])),
+    }
+    if "defense_guard" in locked_cfg:
+        guard_cfg = sleeve_cfg.get("defense_guard", {}) or {}
+        out["defense_guard"] = {
+            "enabled": bool(guard_cfg.get("enabled", False)),
+            "name": str(guard_cfg.get("name", "")),
+            "defense_symbol": str(guard_cfg.get("defense_symbol", "")).upper(),
+            "trigger": str(guard_cfg.get("trigger", "")),
+        }
+    return out
+
+
+def normalize_partial_defense_guard_for_lock(guard_cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(guard_cfg.get("enabled", False)),
+        "name": str(guard_cfg.get("name", "")),
+        "defense_symbol": str(guard_cfg.get("defense_symbol", "")).upper(),
+        "defense_weight": round(float(guard_cfg.get("defense_weight", 0.0)), 6),
+        "signal": str(guard_cfg.get("signal", "")),
+        "hold_days": int(guard_cfg.get("hold_days", 0)),
         "cooldown_days": int(guard_cfg.get("cooldown_days", 0)),
     }
 
@@ -565,10 +596,16 @@ def is_rebalance_due(
 
 def regime_defense_symbols(strategy_cfg: dict[str, Any]) -> list[str]:
     guard_cfg = strategy_cfg.get("regime_defense_guard", {}) or {}
+    partial_cfg = strategy_cfg.get("partial_defense_guard", {}) or {}
+    symbols: list[str] = []
     if not bool(guard_cfg.get("enabled", False)):
-        return []
-    symbols = [str(guard_cfg.get("defense_symbol", "")).upper()]
-    symbols.extend(str(symbol).upper() for symbol in (guard_cfg.get("market_symbols") or []))
+        guard_cfg = {}
+    if bool(guard_cfg.get("enabled", False)):
+        symbols.append(str(guard_cfg.get("defense_symbol", "")).upper())
+        symbols.extend(str(symbol).upper() for symbol in (guard_cfg.get("market_symbols") or []))
+    if bool(partial_cfg.get("enabled", False)):
+        symbols.append(str(partial_cfg.get("defense_symbol", "")).upper())
+        symbols.extend(str(symbol).upper() for symbol in (partial_cfg.get("market_symbols") or []))
     return sorted(symbol for symbol in set(symbols) if symbol)
 
 
@@ -699,6 +736,95 @@ def regime_defense_report(close: pd.DataFrame, strategy_cfg: dict[str, Any]) -> 
         "qqq_ret42": as_float(latest.get("qqq_ret42"), float("nan")),
         "qqq_dd126": as_float(latest.get("qqq_dd126"), float("nan")),
     }
+
+
+def partial_defense_features(close: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    required = ["QQQ"]
+    missing = [symbol for symbol in required if symbol not in close.columns]
+    if missing:
+        raise RuntimeError(f"Partial defense guard missing market data columns: {missing}")
+    qqq = close["QQQ"]
+    features = pd.DataFrame(index=close.index)
+    available = [symbol for symbol in symbols if symbol in close.columns]
+    if available:
+        breadth = close[available] / close[available].shift(20) - 1.0
+        features["breadth20"] = (breadth > 0.0).mean(axis=1)
+    else:
+        features["breadth20"] = float("nan")
+    features["qqq_dd63"] = qqq / qqq.rolling(63).max() - 1.0
+    return features
+
+
+def partial_defense_signal(features: pd.DataFrame, name: str) -> pd.Series:
+    if name == "breadth33_qdd8":
+        return (features["breadth20"] < 0.33) & (features["qqq_dd63"] < -0.08)
+    raise ValueError(f"Unsupported partial defense signal: {name}")
+
+
+def fixed_hold_signal(entry: pd.Series, hold_days: int, cooldown_days: int) -> pd.Series:
+    entry = entry.fillna(False).astype(bool)
+    active_values: list[bool] = []
+    hold_left = 0
+    cooldown = 0
+    for date in entry.index:
+        if cooldown > 0:
+            cooldown -= 1
+        if hold_left > 0:
+            active_values.append(True)
+            hold_left -= 1
+            if hold_left == 0:
+                cooldown = max(cooldown_days, 0)
+        elif cooldown == 0 and bool(entry.loc[date]):
+            active_values.append(True)
+            hold_left = max(hold_days - 1, 0)
+        else:
+            active_values.append(False)
+    return pd.Series(active_values, index=entry.index)
+
+
+def partial_defense_report(close: pd.DataFrame, strategy_cfg: dict[str, Any], symbols: list[str]) -> dict[str, Any]:
+    guard_cfg = strategy_cfg.get("partial_defense_guard", {}) or {}
+    if not bool(guard_cfg.get("enabled", False)):
+        return {"enabled": False, "active": False}
+    features = partial_defense_features(close, symbols)
+    signal_name = str(guard_cfg.get("signal", "breadth33_qdd8"))
+    entry = partial_defense_signal(features, signal_name)
+    hold_days = int(guard_cfg.get("hold_days", 3))
+    cooldown_days = int(guard_cfg.get("cooldown_days", 5))
+    state = fixed_hold_signal(entry, hold_days, cooldown_days)
+    latest = features.iloc[-1]
+    active = bool(state.iloc[-1])
+    active_prev = bool(state.iloc[-2]) if len(state) > 1 else False
+    return {
+        "enabled": True,
+        "name": str(guard_cfg.get("name", "breadth33_qdd8_bil50")),
+        "active": active,
+        "active_previous_completed_day": active_prev,
+        "latest_completed_date": close.index[-1].date().isoformat(),
+        "defense_symbol": str(guard_cfg.get("defense_symbol", "BIL")).upper(),
+        "defense_weight": float(guard_cfg.get("defense_weight", 0.5)),
+        "signal": signal_name,
+        "entry_now": bool(entry.iloc[-1]),
+        "hold_days": hold_days,
+        "cooldown_days": cooldown_days,
+        "breadth20": as_float(latest.get("breadth20"), float("nan")),
+        "qqq_dd63": as_float(latest.get("qqq_dd63"), float("nan")),
+    }
+
+
+def apply_partial_defense_overlay(
+    target_exposures: dict[str, float],
+    partial_guard: dict[str, Any],
+) -> dict[str, float]:
+    if not partial_guard.get("active"):
+        return target_exposures
+    defense_symbol = str(partial_guard.get("defense_symbol", "")).upper()
+    defense_weight = min(max(float(partial_guard.get("defense_weight", 0.0)), 0.0), 1.0)
+    if not defense_symbol or defense_weight <= 0.0:
+        return target_exposures
+    scaled = {symbol: float(exposure) * (1.0 - defense_weight) for symbol, exposure in target_exposures.items()}
+    scaled[defense_symbol] = scaled.get(defense_symbol, 0.0) + defense_weight
+    return {symbol: exposure for symbol, exposure in scaled.items() if abs(exposure) > 1e-12}
 
 
 def rebalance_phase_status(
@@ -928,6 +1054,35 @@ def quantum_sleeve_targets(
             "target_weights": {symbol: weight for symbol in symbols},
         },
     )
+
+
+def apply_quantum_sleeve_defense(
+    quantum_exposures: dict[str, float],
+    quantum_report: dict[str, Any],
+    partial_guard: dict[str, Any],
+    strategy_cfg: dict[str, Any],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    sleeve_cfg = strategy_cfg.get("quantum_sleeve", {}) or {}
+    guard_cfg = sleeve_cfg.get("defense_guard", {}) or {}
+    if not bool(guard_cfg.get("enabled", False)) or not quantum_exposures:
+        quantum_report["defense_guard"] = {"enabled": bool(guard_cfg.get("enabled", False)), "active": False}
+        return quantum_exposures, quantum_report
+    trigger = str(guard_cfg.get("trigger", "partial_defense_active"))
+    active = trigger == "partial_defense_active" and bool(partial_guard.get("active"))
+    defense_symbol = str(guard_cfg.get("defense_symbol", "BIL")).upper()
+    quantum_report["defense_guard"] = {
+        "enabled": True,
+        "active": active,
+        "name": str(guard_cfg.get("name", "quantum_to_bil_on_breadth33_qdd8")),
+        "trigger": trigger,
+        "defense_symbol": defense_symbol,
+    }
+    if not active:
+        return quantum_exposures, quantum_report
+    allocation = sum(float(exposure) for exposure in quantum_exposures.values())
+    quantum_report["defense_guard"]["replaced_symbols"] = sorted(quantum_exposures)
+    quantum_report["defense_guard"]["replaced_allocation"] = allocation
+    return {defense_symbol: allocation}, quantum_report
 
 
 def combined_phase_sleeve_targets(
@@ -1468,6 +1623,7 @@ def main() -> None:
         return
     selection = select_strategy_symbols(close, strategy_cfg, symbols)
     defense_guard = regime_defense_report(close, strategy_cfg)
+    partial_guard = partial_defense_report(close, strategy_cfg, symbols)
     chosen = selection.symbols
     if not clock.get("is_open"):
         report = {
@@ -1481,6 +1637,7 @@ def main() -> None:
             "spy20": selection.spy20,
             "spy_dd63": selection.spy_dd63,
             "regime_defense_guard": defense_guard,
+            "partial_defense_guard": partial_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -1493,12 +1650,20 @@ def main() -> None:
     due, due_reason, trading_days_elapsed = is_rebalance_due(close, state, rebalance_days, bool(current_qty))
     defense_symbol = str(defense_guard.get("defense_symbol", "")).upper()
     defense_position_active = bool(defense_symbol and current_qty.get(defense_symbol))
+    partial_defense_symbol = str(partial_guard.get("defense_symbol", "")).upper()
+    partial_position_active = bool(partial_defense_symbol and current_qty.get(partial_defense_symbol))
     if defense_guard.get("active") and current_qty != {defense_symbol: current_qty.get(defense_symbol, 0)}:
         due = True
         due_reason = "regime_defense_entry"
     elif defense_position_active and not defense_guard.get("active"):
         due = True
         due_reason = "regime_defense_exit"
+    elif partial_guard.get("active") and not partial_position_active:
+        due = True
+        due_reason = "partial_defense_entry"
+    elif partial_position_active and not partial_guard.get("active"):
+        due = True
+        due_reason = "partial_defense_exit"
     phase_days_elapsed = (
         trading_days_since(close, rebalance_phase_anchor_date)
         if rebalance_phase_anchor_date
@@ -1547,6 +1712,7 @@ def main() -> None:
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
             "regime_defense_guard": defense_guard,
+            "partial_defense_guard": partial_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1573,6 +1739,7 @@ def main() -> None:
             "rebalance_due_reason": due_reason,
             "force_rebalance": bool(args.force_rebalance),
             "regime_defense_guard": defense_guard,
+            "partial_defense_guard": partial_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1591,6 +1758,7 @@ def main() -> None:
             "rebalance_phase": phase_status,
             "rebalance_due_reason": due_reason,
             "regime_defense_guard": defense_guard,
+            "partial_defense_guard": partial_guard,
             "evidence": {"forward_lock": forward_lock, "anomaly_guard": anomaly_guard},
         }
         write_json(ensure_dir(ROOT / "reports") / "pure_momentum_paper_run.json", report)
@@ -1664,18 +1832,36 @@ def main() -> None:
             bool(args.force_rebalance),
         )
         quantum_exposures, quantum_sleeve_report = quantum_sleeve_targets(close, strategy_cfg)
+        quantum_exposures, quantum_sleeve_report = apply_quantum_sleeve_defense(
+            quantum_exposures,
+            quantum_sleeve_report,
+            partial_guard,
+            strategy_cfg,
+        )
         for symbol, exposure in quantum_exposures.items():
             target_exposures[symbol] = target_exposures.get(symbol, 0.0) + exposure
+        target_exposures = apply_partial_defense_overlay(target_exposures, partial_guard)
         chosen = sorted(set(chosen) | set(quantum_exposures))
+        if partial_guard.get("active"):
+            chosen = sorted(set(chosen) | {str(partial_guard["defense_symbol"]).upper()})
         active_target_gross = sum(target_exposures.values())
         target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
         plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
     else:
         target_exposures = target_exposures_from_selection(chosen, active_target_gross, selection.target_weights)
         quantum_exposures, quantum_sleeve_report = quantum_sleeve_targets(close, strategy_cfg)
+        quantum_exposures, quantum_sleeve_report = apply_quantum_sleeve_defense(
+            quantum_exposures,
+            quantum_sleeve_report,
+            partial_guard,
+            strategy_cfg,
+        )
         for symbol, exposure in quantum_exposures.items():
             target_exposures[symbol] = target_exposures.get(symbol, 0.0) + exposure
+        target_exposures = apply_partial_defense_overlay(target_exposures, partial_guard)
         chosen = sorted(set(chosen) | set(quantum_exposures))
+        if partial_guard.get("active"):
+            chosen = sorted(set(chosen) | {str(partial_guard["defense_symbol"]).upper()})
         active_target_gross = sum(target_exposures.values())
         target_qty = target_qty_from_exposures(close, target_exposures, equity, max_gross)
         plans = build_plan_from_target_exposures(close, target_exposures, current_qty, equity, max_gross)
@@ -1746,6 +1932,7 @@ def main() -> None:
         "phase_sleeves": phase_sleeve_reports,
         "quantum_sleeve": quantum_sleeve_report,
         "regime_defense_guard": defense_guard,
+        "partial_defense_guard": partial_guard,
         "rebalance_due": due,
         "rebalance_due_reason": due_reason,
         "last_rebalance_date": state.get("last_rebalance_date"),
