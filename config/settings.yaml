@@ -11,16 +11,16 @@ reports:
 evidence:
   forward_lock:
     enabled: true
-    locked_at_utc: "2026-05-31T21:29:36Z"
-    strategy_name: pure_momentum_cap_phase_blend_gross12_phase85_10_quantum5_pfix_stateful_guard
+    locked_at_utc: "2026-06-01T11:07:19Z"
+    strategy_name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_stateful_guard
     lookback_days: 63
-    top_n: 7
+    top_n: 5
     rebalance_days: 7
     target_gross_leverage: 1.2
     max_gross_leverage: 1.2
     phase_sleeves:
-      phase0_core: 0.85
-      phase1_diversifier: 0.10
+      phase0_core: 0.75
+      phase1_diversifier: 0.20
     symbol_weight_caps:
       SOXL: 0.08
       TECL: 0.12
@@ -54,10 +54,10 @@ evidence:
     max_open_orders_after_run: 0
 
 pure_momentum:
-  name: pure_momentum_cap_phase_blend_gross12_phase85_10_quantum5_pfix_stateful_guard
+  name: pure_momentum_cap_phase_blend_gross12_top5_phase75_20_quantum5_pfix_stateful_guard
   backtest_start: "2023-04-25"
   lookback_days: 63
-  top_n: 7
+  top_n: 5
   rebalance_days: 7
   rebalance_phase_lock: true
   rebalance_phase_anchor_date: "2026-05-22"
@@ -70,10 +70,10 @@ pure_momentum:
   phase_sleeves:
     - name: phase0_core
       phase_offset: 0
-      allocation: 0.85
+      allocation: 0.75
     - name: phase1_diversifier
       phase_offset: 1
-      allocation: 0.10
+      allocation: 0.20
   quantum_sleeve:
     enabled: true
     allocation: 0.05
