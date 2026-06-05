@@ -513,3 +513,12 @@ def test_managed_positions_keeps_fractional_quantities() -> None:
     positions = [{"symbol": "AMD", "qty": "0.318421"}, {"symbol": "IGNORED", "qty": "10"}]
 
     assert managed_positions(positions, {"AMD"}) == {"AMD": 0.318421}
+
+
+def test_managed_positions_ignores_fractional_dust() -> None:
+    positions = [
+        {"symbol": "AMD", "qty": "0.000000321", "market_value": "0.00016"},
+        {"symbol": "SOXL", "qty": "0.020000", "market_value": "4.20"},
+    ]
+
+    assert managed_positions(positions, {"AMD", "SOXL"}) == {"SOXL": 0.02}

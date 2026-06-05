@@ -26,6 +26,7 @@ from src.utils.io_utils import ensure_dir, load_yaml_config, write_json
 DAILY_BUY_BLOCK_LOSS_PCT = 0.02
 MIN_DELTA_NOTIONAL = 25.0
 MIN_FRACTIONAL_NOTIONAL = 1.0
+MIN_MANAGED_POSITION_QTY = 0.000001
 BUYING_POWER_BUFFER = 0.98
 ORDER_BUYING_POWER_BUFFER = 0.98
 MANAGED_ORDER_PREFIX = "gh-puremom"
@@ -890,6 +891,11 @@ def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> di
         if symbol not in universe:
             continue
         qty = float(position.get("qty", 0.0))
+        if abs(qty) < MIN_MANAGED_POSITION_QTY:
+            continue
+        market_value = position.get("market_value")
+        if market_value is not None and abs(float(market_value or 0.0)) < MIN_FRACTIONAL_NOTIONAL:
+            continue
         out[symbol] = qty
     return out
 
