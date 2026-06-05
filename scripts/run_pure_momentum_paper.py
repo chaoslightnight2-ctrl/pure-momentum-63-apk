@@ -1221,14 +1221,17 @@ def wait_for_flatten(
 def fit_buys_to_buying_power(
     plans: list[PaperOrderPlan],
     buying_power: float,
+    buying_power_buffer: float = BUYING_POWER_BUFFER,
 ) -> tuple[list[PaperOrderPlan], dict[str, Any]]:
     buys = [plan for plan in plans if plan.side == "buy"]
     buy_notional = sum(plan.notional for plan in buys)
-    available = max(0.0, buying_power * BUYING_POWER_BUFFER)
+    buying_power_buffer = min(max(float(buying_power_buffer), 0.0), 1.0)
+    available = max(0.0, buying_power * buying_power_buffer)
     info = {
         "applied": False,
         "original_buy_notional": round(buy_notional, 2),
         "available_buy_notional": round(available, 2),
+        "buying_power_buffer": buying_power_buffer,
         "scale": 1.0,
         "dropped_buy_symbols": [],
     }
@@ -1319,6 +1322,7 @@ def cap_buy_to_current_buying_power(
     client: AlpacaPaperTradingClient,
     plan: PaperOrderPlan,
     remaining_buy_count: int = 1,
+    order_buying_power_buffer: float = ORDER_BUYING_POWER_BUFFER,
 ) -> tuple[PaperOrderPlan | None, dict[str, Any]]:
     if plan.side != "buy":
         return plan, {"applied": False}
@@ -1333,7 +1337,8 @@ def cap_buy_to_current_buying_power(
     )
     effective_buying_power = min(buying_power, daytrading_buying_power) if daytrading_buying_power > 0.0 else buying_power
     remaining_buy_count = max(1, remaining_buy_count)
-    notional_cap = (effective_buying_power * ORDER_BUYING_POWER_BUFFER) / remaining_buy_count
+    order_buying_power_buffer = min(max(float(order_buying_power_buffer), 0.0), 1.0)
+    notional_cap = (effective_buying_power * order_buying_power_buffer) / remaining_buy_count
     if plan.notional_amount is not None:
         capped_notional = min(plan.notional, notional_cap)
         info = {
@@ -1341,6 +1346,7 @@ def cap_buy_to_current_buying_power(
             "buying_power": round(buying_power, 2),
             "daytrading_buying_power": round(daytrading_buying_power, 2),
             "effective_buying_power": round(effective_buying_power, 2),
+            "order_buying_power_buffer": order_buying_power_buffer,
             "original_notional": round(plan.notional, 2),
             "capped_notional": round(capped_notional, 2),
         }
@@ -1354,6 +1360,7 @@ def cap_buy_to_current_buying_power(
         "buying_power": round(buying_power, 2),
         "daytrading_buying_power": round(daytrading_buying_power, 2),
         "effective_buying_power": round(effective_buying_power, 2),
+        "order_buying_power_buffer": order_buying_power_buffer,
         "original_qty": plan.qty,
         "capped_qty": capped_qty,
     }
@@ -1390,13 +1397,19 @@ def submit_plans(
     execute: bool,
     run_key: str,
     wait_after_order_seconds: int = 0,
+    order_buying_power_buffer: float = ORDER_BUYING_POWER_BUFFER,
 ) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
     for plan_idx, plan in enumerate(plans):
         cap_info: dict[str, Any] = {"applied": False}
         if execute:
             remaining_buy_count = sum(1 for item in plans[plan_idx:] if item.side == "buy")
-            capped_plan, cap_info = cap_buy_to_current_buying_power(client, plan, remaining_buy_count)
+            capped_plan, cap_info = cap_buy_to_current_buying_power(
+                client,
+                plan,
+                remaining_buy_count,
+                order_buying_power_buffer=order_buying_power_buffer,
+            )
             if capped_plan is None:
                 submitted.append(
                     {
@@ -1436,7 +1449,7 @@ def submit_plans(
                     row["filled_avg_price"] = final_order.get("filled_avg_price")
             except requests.HTTPError as exc:
                 buying_power = buying_power_from_error(exc)
-                retry_notional = buying_power * ORDER_BUYING_POWER_BUFFER if buying_power else 0.0
+                retry_notional = buying_power * order_buying_power_buffer if buying_power else 0.0
                 retry_qty = int(math.floor(retry_notional / plan.price)) if buying_power and plan.notional_amount is None else 0
                 retry_qty = min(max(plan.qty - 1, 0), retry_qty)
                 if plan.side == "buy" and retry_qty >= 1 and retry_qty * plan.price >= MIN_DELTA_NOTIONAL:
@@ -1522,6 +1535,7 @@ def submit_rebalance_plans(
     run_key: str,
     wait_after_order_seconds: int,
     buy_submission_rounds: int,
+    order_buying_power_buffer: float = ORDER_BUYING_POWER_BUFFER,
 ) -> list[dict[str, Any]]:
     submitted: list[dict[str, Any]] = []
     sell_plans = [plan for plan in plans if plan.side == "sell"]
@@ -1534,6 +1548,7 @@ def submit_rebalance_plans(
                 execute,
                 f"{run_key}-sell",
                 wait_after_order_seconds=wait_after_order_seconds,
+                order_buying_power_buffer=order_buying_power_buffer,
             )
         )
     for idx, batch in enumerate(split_buy_plans_into_rounds(buy_plans, buy_submission_rounds), start=1):
@@ -1543,6 +1558,7 @@ def submit_rebalance_plans(
             execute,
             f"{run_key}-b{idx}",
             wait_after_order_seconds=wait_after_order_seconds,
+            order_buying_power_buffer=order_buying_power_buffer,
         )
         for row in rows:
             row["buy_round"] = idx
@@ -1637,6 +1653,8 @@ def main() -> None:
     parser.add_argument("--ignore-daily-loss-block", action="store_true")
     parser.add_argument("--buy-only-rebalance", action="store_true")
     parser.add_argument("--buy-submission-rounds-override", type=int)
+    parser.add_argument("--buying-power-buffer-override", type=float)
+    parser.add_argument("--order-buying-power-buffer-override", type=float)
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
@@ -1659,6 +1677,16 @@ def main() -> None:
     buy_submission_rounds = int(strategy_cfg.get("buy_submission_rounds", 10))
     if args.buy_submission_rounds_override:
         buy_submission_rounds = max(1, int(args.buy_submission_rounds_override))
+    buying_power_buffer = (
+        BUYING_POWER_BUFFER
+        if args.buying_power_buffer_override is None
+        else float(args.buying_power_buffer_override)
+    )
+    order_buying_power_buffer = (
+        ORDER_BUYING_POWER_BUFFER
+        if args.order_buying_power_buffer_override is None
+        else float(args.order_buying_power_buffer_override)
+    )
     target_gross = float(strategy_cfg.get("target_gross_leverage", 2.0))
     max_gross = float(strategy_cfg.get("max_gross_leverage", 2.0))
     strategy_name = str(strategy_cfg.get("name", "pure_momentum_mid_breadth_spy20_sleeve_gross18"))
@@ -1852,6 +1880,7 @@ def main() -> None:
             args.execute,
             f"{run_key}-flat",
             wait_after_order_seconds=order_fill_wait_seconds,
+            order_buying_power_buffer=order_buying_power_buffer,
         )
         remaining_positions, remaining_open_orders = wait_for_flatten(client, universe, flatten_wait_seconds) if args.execute else ({}, [])
         if remaining_positions or has_blocking_open_order(remaining_open_orders, universe):
@@ -1946,7 +1975,11 @@ def main() -> None:
     if daily_loss_blocked_buys and not args.ignore_daily_loss_block:
         plans = [plan for plan in plans if plan.side == "sell"]
 
-    plans, buying_power_adjustment = fit_buys_to_buying_power(plans, buying_power)
+    plans, buying_power_adjustment = fit_buys_to_buying_power(
+        plans,
+        buying_power,
+        buying_power_buffer=buying_power_buffer,
+    )
     buy_notional = sum(plan.notional for plan in plans if plan.side == "buy")
 
     run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -1957,6 +1990,7 @@ def main() -> None:
         run_key,
         wait_after_order_seconds=order_fill_wait_seconds,
         buy_submission_rounds=buy_submission_rounds,
+        order_buying_power_buffer=order_buying_power_buffer,
     )
     final_account = client.get_account() if args.execute else account
     final_positions = managed_positions(client.get_positions(), universe) if args.execute else current_qty
@@ -2021,6 +2055,8 @@ def main() -> None:
         "state_updated": state_updated,
         "sell_all_before_rebalance": sell_all_before_rebalance,
         "buy_submission_rounds": buy_submission_rounds,
+        "buying_power_buffer": buying_power_buffer,
+        "order_buying_power_buffer": order_buying_power_buffer,
         "buy_only_rebalance": bool(args.buy_only_rebalance),
         "flatten_orders": flatten_orders,
         "buying_power": buying_power,

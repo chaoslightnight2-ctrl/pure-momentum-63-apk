@@ -53,7 +53,9 @@ jobs:
             --execute \
             --force-rebalance \
             --ignore-phase-lock \
-            --buy-submission-rounds-override 1
+            --buy-submission-rounds-override 1 \
+            --buying-power-buffer-override 0.999 \
+            --order-buying-power-buffer-override 0.999
 
       - name: Commit rebalance state
         shell: bash

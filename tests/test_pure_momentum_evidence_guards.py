@@ -485,6 +485,20 @@ def test_small_notional_buying_power_scale_preserves_orders() -> None:
     assert all(plan.notional_amount is not None for plan in adjusted)
 
 
+def test_buying_power_buffer_override_uses_nearly_all_cash() -> None:
+    plans = [
+        PaperOrderPlan("AMD", "buy", qty=0.0, price=190.0, target_qty=0.3, notional_amount=54.2),
+        PaperOrderPlan("SOXL", "buy", qty=0.0, price=40.0, target_qty=0.5, notional_amount=21.68),
+    ]
+
+    adjusted, info = fit_buys_to_buying_power(plans, buying_power=60.0, buying_power_buffer=0.999)
+
+    assert info["applied"] is True
+    assert info["buying_power_buffer"] == 0.999
+    assert round(sum(plan.notional for plan in adjusted), 2) == 59.94
+    assert all(plan.notional_amount is not None for plan in adjusted)
+
+
 def test_notional_buy_rounds_do_not_create_sub_one_dollar_orders() -> None:
     plans = [PaperOrderPlan("ARQQ", "buy", qty=0.0, price=4.0, target_qty=0.675, notional_amount=2.7)]
 
