@@ -491,6 +491,12 @@ def test_small_account_uses_fractional_notional_buys() -> None:
     assert round(by_symbol["SOXL"].notional_amount, 2) == 21.68
 
 
+def test_fractional_qty_payload_does_not_round_above_available_qty() -> None:
+    plan = PaperOrderPlan("RIOT", "sell", qty=1.908837851, price=24.0, target_qty=0.0)
+
+    assert plan.payload("test")["qty"] == "1.908837"
+
+
 def test_small_notional_buying_power_scale_preserves_orders() -> None:
     plans = [
         PaperOrderPlan("AMD", "buy", qty=0.0, price=190.0, target_qty=0.3, notional_amount=54.2),

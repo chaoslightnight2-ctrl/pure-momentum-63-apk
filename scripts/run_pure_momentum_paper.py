@@ -36,7 +36,10 @@ FILLED_ORDER_STATES = {"filled", "partially_filled"}
 
 
 def format_qty(qty: float) -> str:
-    return f"{float(qty):.6f}".rstrip("0").rstrip(".")
+    qty = float(qty)
+    sign = -1.0 if qty < 0.0 else 1.0
+    floored_qty = math.floor(abs(qty) * 1_000_000) / 1_000_000
+    return f"{sign * floored_qty:.6f}".rstrip("0").rstrip(".")
 
 
 @dataclass
