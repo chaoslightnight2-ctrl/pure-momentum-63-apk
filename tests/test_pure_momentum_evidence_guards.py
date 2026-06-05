@@ -12,14 +12,18 @@ sys.path.insert(0, str(ROOT))
 from scripts.run_pure_momentum_paper import (
     PaperOrderPlan,
     anomaly_guard_report,
+    build_plan_from_target_exposures,
     cap_buy_to_current_buying_power,
     execution_drift_report,
+    fit_buys_to_buying_power,
     forward_lock_report,
     apply_partial_defense_overlay,
     apply_quantum_sleeve_defense,
+    managed_positions,
     partial_defense_report,
     regime_defense_report,
     regime_defense_symbols,
+    split_buy_plans_into_rounds,
     stateful_regime_signal,
 )
 
@@ -417,3 +421,53 @@ def test_buying_power_cap_uses_buying_power_when_daytrading_power_zero() -> None
     assert capped.qty == 61
     assert info["effective_buying_power"] == 200000.0
     assert info["applied"] is False
+
+
+def test_small_account_uses_fractional_notional_buys() -> None:
+    close = pd.DataFrame(
+        {"AMD": [190.0], "SOXL": [40.0]},
+        index=pd.to_datetime(["2026-06-01"]),
+    )
+
+    plans = build_plan_from_target_exposures(
+        close,
+        {"AMD": 0.20, "SOXL": 0.08},
+        {},
+        equity=271.0,
+        max_gross=1.2,
+    )
+
+    by_symbol = {plan.symbol: plan for plan in plans}
+    assert round(by_symbol["AMD"].notional_amount, 2) == 54.2
+    assert by_symbol["AMD"].payload("test")["notional"] == "54.20"
+    assert round(by_symbol["SOXL"].notional_amount, 2) == 21.68
+
+
+def test_small_notional_buying_power_scale_preserves_orders() -> None:
+    plans = [
+        PaperOrderPlan("AMD", "buy", qty=0.0, price=190.0, target_qty=0.3, notional_amount=54.2),
+        PaperOrderPlan("SOXL", "buy", qty=0.0, price=40.0, target_qty=0.5, notional_amount=21.68),
+    ]
+
+    adjusted, info = fit_buys_to_buying_power(plans, buying_power=60.0)
+
+    assert info["applied"] is True
+    assert len(adjusted) == 2
+    assert round(sum(plan.notional for plan in adjusted), 2) == 58.8
+    assert all(plan.notional_amount is not None for plan in adjusted)
+
+
+def test_notional_buy_rounds_do_not_create_sub_one_dollar_orders() -> None:
+    plans = [PaperOrderPlan("ARQQ", "buy", qty=0.0, price=4.0, target_qty=0.675, notional_amount=2.7)]
+
+    batches = split_buy_plans_into_rounds(plans, rounds=10)
+
+    assert len(batches) == 2
+    notionals = [batch[0].notional for batch in batches]
+    assert notionals == [1.35, 1.35]
+
+
+def test_managed_positions_keeps_fractional_quantities() -> None:
+    positions = [{"symbol": "AMD", "qty": "0.318421"}, {"symbol": "IGNORED", "qty": "10"}]
+
+    assert managed_positions(positions, {"AMD"}) == {"AMD": 0.318421}

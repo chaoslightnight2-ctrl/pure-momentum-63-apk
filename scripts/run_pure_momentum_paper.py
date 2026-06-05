@@ -34,13 +34,17 @@ OPEN_ORDER_STATES = {"new", "accepted", "pending_new", "partially_filled", "pend
 FILLED_ORDER_STATES = {"filled", "partially_filled"}
 
 
+def format_qty(qty: float) -> str:
+    return f"{float(qty):.6f}".rstrip("0").rstrip(".")
+
+
 @dataclass
 class PaperOrderPlan:
     symbol: str
     side: str
-    qty: int
+    qty: float
     price: float
-    target_qty: int
+    target_qty: float
     notional_amount: float | None = None
 
     @property
@@ -61,10 +65,10 @@ class PaperOrderPlan:
         if self.notional_amount is not None:
             payload["notional"] = f"{self.notional_amount:.2f}"
         else:
-            payload["qty"] = str(self.qty)
+            payload["qty"] = format_qty(self.qty)
         return payload
 
-    def resized(self, qty: int) -> "PaperOrderPlan":
+    def resized(self, qty: float) -> "PaperOrderPlan":
         return PaperOrderPlan(
             symbol=self.symbol,
             side=self.side,
@@ -879,14 +883,14 @@ def close_through_date(close: pd.DataFrame, date_str: str | None) -> pd.DataFram
     return close.loc[close.index.normalize() <= date]
 
 
-def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> dict[str, int]:
-    out: dict[str, int] = {}
+def managed_positions(positions: list[dict[str, Any]], universe: set[str]) -> dict[str, float]:
+    out: dict[str, float] = {}
     for position in positions:
         symbol = str(position.get("symbol", "")).upper()
         if symbol not in universe:
             continue
         qty = float(position.get("qty", 0.0))
-        out[symbol] = int(math.floor(abs(qty))) if qty > 0 else -int(math.floor(abs(qty)))
+        out[symbol] = qty
     return out
 
 
@@ -910,7 +914,7 @@ def should_block_new_buys(account: dict[str, Any]) -> bool:
 def build_plan(
     close: pd.DataFrame,
     selected: list[str],
-    current_qty: dict[str, int],
+    current_qty: dict[str, float],
     equity: float,
     target_gross: float,
     max_gross: float,
@@ -919,11 +923,11 @@ def build_plan(
     target_gross = min(target_gross, max_gross)
     if target_weights is None:
         target_weights = {symbol: 1.0 / len(selected) for symbol in selected} if selected else {}
-    target_qty: dict[str, int] = {}
+    target_qty: dict[str, float] = {}
     for symbol in selected:
         price = float(close[symbol].iloc[-1])
         target_weight = target_gross * float(target_weights.get(symbol, 0.0))
-        target_qty[symbol] = int(math.floor((equity * target_weight) / price)) if price > 0 else 0
+        target_qty[symbol] = (equity * target_weight) / price if price > 0 else 0.0
 
     plans: list[PaperOrderPlan] = []
     all_symbols = sorted(set(current_qty) | set(target_qty))
@@ -931,36 +935,48 @@ def build_plan(
         price = float(close[symbol].iloc[-1]) if symbol in close.columns else 0.0
         if price <= 0.0:
             continue
-        desired = target_qty.get(symbol, 0)
-        current = current_qty.get(symbol, 0)
+        desired = float(target_qty.get(symbol, 0.0))
+        current = float(current_qty.get(symbol, 0.0))
         delta = desired - current
-        if abs(delta) < 1:
+        delta_notional = abs(delta * price)
+        if delta_notional < MIN_FRACTIONAL_NOTIONAL:
             continue
         side = "buy" if delta > 0 else "sell"
-        qty = abs(int(delta))
+        qty = abs(delta)
         if side == "sell":
-            qty = min(qty, max(current, 0))
-        if qty < 1 or qty * price < MIN_DELTA_NOTIONAL:
+            qty = min(qty, max(current, 0.0))
+            if qty * price < MIN_FRACTIONAL_NOTIONAL:
+                continue
+            plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
             continue
-        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
+        plans.append(
+            PaperOrderPlan(
+                symbol=symbol,
+                side=side,
+                qty=0.0,
+                price=price,
+                target_qty=desired,
+                notional_amount=delta_notional,
+            )
+        )
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
 
 
 def build_plan_from_target_exposures(
     close: pd.DataFrame,
     target_exposures: dict[str, float],
-    current_qty: dict[str, int],
+    current_qty: dict[str, float],
     equity: float,
     max_gross: float,
 ) -> list[PaperOrderPlan]:
     total_gross = sum(max(0.0, float(weight)) for weight in target_exposures.values())
     scale = min(1.0, max_gross / total_gross) if total_gross > max_gross and total_gross > 0.0 else 1.0
-    target_qty: dict[str, int] = {}
+    target_qty: dict[str, float] = {}
     for symbol, exposure in target_exposures.items():
         if symbol not in close.columns:
             continue
         price = float(close[symbol].iloc[-1])
-        target_qty[symbol] = int(math.floor((equity * float(exposure) * scale) / price)) if price > 0 else 0
+        target_qty[symbol] = (equity * float(exposure) * scale) / price if price > 0 else 0.0
 
     plans: list[PaperOrderPlan] = []
     all_symbols = sorted(set(current_qty) | set(target_qty))
@@ -968,18 +984,30 @@ def build_plan_from_target_exposures(
         price = float(close[symbol].iloc[-1]) if symbol in close.columns else 0.0
         if price <= 0.0:
             continue
-        desired = target_qty.get(symbol, 0)
-        current = current_qty.get(symbol, 0)
+        desired = float(target_qty.get(symbol, 0.0))
+        current = float(current_qty.get(symbol, 0.0))
         delta = desired - current
-        if abs(delta) < 1:
+        delta_notional = abs(delta * price)
+        if delta_notional < MIN_FRACTIONAL_NOTIONAL:
             continue
         side = "buy" if delta > 0 else "sell"
-        qty = abs(int(delta))
+        qty = abs(delta)
         if side == "sell":
-            qty = min(qty, max(current, 0))
-        if qty < 1 or qty * price < MIN_DELTA_NOTIONAL:
+            qty = min(qty, max(current, 0.0))
+            if qty * price < MIN_FRACTIONAL_NOTIONAL:
+                continue
+            plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
             continue
-        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=qty, price=price, target_qty=desired))
+        plans.append(
+            PaperOrderPlan(
+                symbol=symbol,
+                side=side,
+                qty=0.0,
+                price=price,
+                target_qty=desired,
+                notional_amount=delta_notional,
+            )
+        )
     return sorted(plans, key=lambda plan: 0 if plan.side == "sell" else 1)
 
 
@@ -988,15 +1016,15 @@ def target_qty_from_exposures(
     target_exposures: dict[str, float],
     equity: float,
     max_gross: float,
-) -> dict[str, int]:
+) -> dict[str, float]:
     total_gross = sum(max(0.0, float(weight)) for weight in target_exposures.values())
     scale = min(1.0, max_gross / total_gross) if total_gross > max_gross and total_gross > 0.0 else 1.0
-    target_qty: dict[str, int] = {}
+    target_qty: dict[str, float] = {}
     for symbol, exposure in target_exposures.items():
         if symbol not in close.columns:
             continue
         price = float(close[symbol].iloc[-1])
-        target_qty[symbol] = int(math.floor((equity * float(exposure) * scale) / price)) if price > 0.0 else 0
+        target_qty[symbol] = (equity * float(exposure) * scale) / price if price > 0.0 else 0.0
     return target_qty
 
 
@@ -1160,18 +1188,18 @@ def combined_phase_sleeve_targets(
     return target_exposures, sorted(set(selected_all)), reports, updated
 
 
-def build_liquidation_plan(close: pd.DataFrame, current_qty: dict[str, int]) -> list[PaperOrderPlan]:
+def build_liquidation_plan(close: pd.DataFrame, current_qty: dict[str, float]) -> list[PaperOrderPlan]:
     plans: list[PaperOrderPlan] = []
     for symbol in sorted(current_qty):
-        qty = current_qty[symbol]
+        qty = float(current_qty[symbol])
         price = float(close[symbol].iloc[-1]) if symbol in close.columns else 0.0
-        if price <= 0.0 or qty == 0:
+        if price <= 0.0 or qty == 0.0:
             continue
         side = "sell" if qty > 0 else "buy"
-        order_qty = abs(int(qty))
-        if order_qty < 1 or order_qty * price < MIN_DELTA_NOTIONAL:
+        order_qty = abs(qty)
+        if order_qty * price < MIN_FRACTIONAL_NOTIONAL:
             continue
-        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=order_qty, price=price, target_qty=0))
+        plans.append(PaperOrderPlan(symbol=symbol, side=side, qty=order_qty, price=price, target_qty=0.0))
     return plans
 
 
@@ -1179,7 +1207,7 @@ def wait_for_flatten(
     client: AlpacaPaperTradingClient,
     universe: set[str],
     timeout_seconds: int,
-) -> tuple[dict[str, int], list[dict[str, Any]]]:
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
     deadline = time.monotonic() + max(timeout_seconds, 0)
     positions = managed_positions(client.get_positions(), universe)
     open_orders = client.get_orders(status="open", nested=True)
@@ -1216,6 +1244,13 @@ def fit_buys_to_buying_power(
         if plan.side != "buy":
             adjusted.append(plan)
             continue
+        if plan.notional_amount is not None:
+            scaled_notional = plan.notional * scale
+            if scaled_notional < MIN_FRACTIONAL_NOTIONAL:
+                dropped.append(plan.symbol)
+                continue
+            adjusted.append(plan.resized_notional(scaled_notional))
+            continue
         qty = int(math.floor(plan.qty * scale))
         if qty < 1 or qty * plan.price < MIN_DELTA_NOTIONAL:
             dropped.append(plan.symbol)
@@ -1236,11 +1271,21 @@ def fit_buys_to_buying_power(
 def split_buy_plans_into_rounds(plans: list[PaperOrderPlan], rounds: int) -> list[list[PaperOrderPlan]]:
     rounds = max(1, rounds)
     buys = [plan for plan in plans if plan.side == "buy"]
+    notional_buys = [plan for plan in buys if plan.notional_amount is not None]
+    share_buys = [plan for plan in buys if plan.notional_amount is None]
     batches: list[list[PaperOrderPlan]] = []
-    allocated = {plan.symbol: 0 for plan in buys}
+    for plan in notional_buys:
+        split_count = min(rounds, max(1, int(math.floor(plan.notional / MIN_FRACTIONAL_NOTIONAL))))
+        amount = plan.notional / split_count
+        for round_idx in range(split_count):
+            while len(batches) <= round_idx:
+                batches.append([])
+            batches[round_idx].append(plan.resized_notional(amount))
+
+    allocated = {plan.symbol: 0.0 for plan in share_buys}
     for round_idx in range(1, rounds + 1):
         batch: list[PaperOrderPlan] = []
-        for plan in buys:
+        for plan in share_buys:
             cumulative = int(math.floor(plan.qty * round_idx / rounds))
             qty = cumulative - allocated[plan.symbol]
             if qty < 1 or qty * plan.price < MIN_DELTA_NOTIONAL:
@@ -1248,7 +1293,10 @@ def split_buy_plans_into_rounds(plans: list[PaperOrderPlan], rounds: int) -> lis
             allocated[plan.symbol] += qty
             batch.append(plan.resized(qty))
         if batch:
-            batches.append(batch)
+            while len(batches) < round_idx:
+                batches.append([])
+            batches[round_idx - 1].extend(batch)
+    batches = [batch for batch in batches if batch]
     return batches
 
 
@@ -1286,6 +1334,19 @@ def cap_buy_to_current_buying_power(
     effective_buying_power = min(buying_power, daytrading_buying_power) if daytrading_buying_power > 0.0 else buying_power
     remaining_buy_count = max(1, remaining_buy_count)
     notional_cap = (effective_buying_power * ORDER_BUYING_POWER_BUFFER) / remaining_buy_count
+    if plan.notional_amount is not None:
+        capped_notional = min(plan.notional, notional_cap)
+        info = {
+            "applied": capped_notional < plan.notional,
+            "buying_power": round(buying_power, 2),
+            "daytrading_buying_power": round(daytrading_buying_power, 2),
+            "effective_buying_power": round(effective_buying_power, 2),
+            "original_notional": round(plan.notional, 2),
+            "capped_notional": round(capped_notional, 2),
+        }
+        if capped_notional < MIN_FRACTIONAL_NOTIONAL:
+            return None, info
+        return plan.resized_notional(capped_notional), info
     affordable_qty = int(math.floor(notional_cap / plan.price)) if plan.price > 0 else 0
     capped_qty = min(plan.qty, affordable_qty)
     info = {
@@ -1376,8 +1437,8 @@ def submit_plans(
             except requests.HTTPError as exc:
                 buying_power = buying_power_from_error(exc)
                 retry_notional = buying_power * ORDER_BUYING_POWER_BUFFER if buying_power else 0.0
-                retry_qty = int(math.floor(retry_notional / plan.price)) if buying_power else 0
-                retry_qty = min(plan.qty - 1, retry_qty)
+                retry_qty = int(math.floor(retry_notional / plan.price)) if buying_power and plan.notional_amount is None else 0
+                retry_qty = min(max(plan.qty - 1, 0), retry_qty)
                 if plan.side == "buy" and retry_qty >= 1 and retry_qty * plan.price >= MIN_DELTA_NOTIONAL:
                     retry_plan = plan.resized(retry_qty)
                     retry_payload = retry_plan.payload(run_key)
@@ -1491,8 +1552,8 @@ def submit_rebalance_plans(
 
 def execution_drift_report(
     orders: list[dict[str, Any]],
-    target_qty: dict[str, int],
-    final_qty: dict[str, int],
+    target_qty: dict[str, float],
+    final_qty: dict[str, float],
     open_order_count: int,
     evidence_cfg: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1502,13 +1563,20 @@ def execution_drift_report(
 
     symbols = sorted(set(target_qty) | set(final_qty))
     rows = []
-    max_abs_drift = 0
+    max_abs_drift = 0.0
     for symbol in symbols:
-        target = int(target_qty.get(symbol, 0))
-        final = int(final_qty.get(symbol, 0))
+        target = float(target_qty.get(symbol, 0.0))
+        final = float(final_qty.get(symbol, 0.0))
         drift = final - target
         max_abs_drift = max(max_abs_drift, abs(drift))
-        rows.append({"symbol": symbol, "target_qty": target, "final_qty": final, "drift_qty": drift})
+        rows.append(
+            {
+                "symbol": symbol,
+                "target_qty": round(target, 6),
+                "final_qty": round(final, 6),
+                "drift_qty": round(drift, 6),
+            }
+        )
 
     planned_buy_notional = sum(float(order.get("notional_estimate") or 0.0) for order in orders if order.get("side") == "buy")
     filled_buy_notional = 0.0
@@ -1542,7 +1610,7 @@ def execution_drift_report(
         "enabled": True,
         "passed": passed,
         "max_symbol_qty_drift_allowed": max_symbol_qty_drift,
-        "max_abs_symbol_qty_drift": max_abs_drift,
+        "max_abs_symbol_qty_drift": round(max_abs_drift, 6),
         "open_order_count_after_run": open_order_count,
         "planned_buy_notional": round(planned_buy_notional, 2),
         "filled_buy_notional": round(filled_buy_notional, 2),
@@ -1811,7 +1879,7 @@ def main() -> None:
     phase_sleeves_state_updated = False
     quantum_sleeve_report: dict[str, Any] = {"enabled": False}
     target_exposures: dict[str, float] = {}
-    target_qty: dict[str, int] = {}
+    target_qty: dict[str, float] = {}
     if defense_guard.get("active"):
         defense_symbol = str(defense_guard["defense_symbol"]).upper()
         target_exposures = {defense_symbol: float(defense_guard.get("defense_exposure", 1.0))}
