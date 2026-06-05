@@ -1344,7 +1344,7 @@ def cap_buy_to_current_buying_power(
     effective_buying_power = min(buying_power, daytrading_buying_power) if daytrading_buying_power > 0.0 else buying_power
     remaining_buy_count = max(1, remaining_buy_count)
     order_buying_power_buffer = min(max(float(order_buying_power_buffer), 0.0), 1.0)
-    notional_cap = (effective_buying_power * order_buying_power_buffer) / remaining_buy_count
+    notional_cap = effective_buying_power * order_buying_power_buffer
     if plan.notional_amount is not None:
         capped_notional = min(plan.notional, notional_cap)
         info = {
@@ -1352,6 +1352,7 @@ def cap_buy_to_current_buying_power(
             "buying_power": round(buying_power, 2),
             "daytrading_buying_power": round(daytrading_buying_power, 2),
             "effective_buying_power": round(effective_buying_power, 2),
+            "remaining_buy_count": remaining_buy_count,
             "order_buying_power_buffer": order_buying_power_buffer,
             "original_notional": round(plan.notional, 2),
             "capped_notional": round(capped_notional, 2),

@@ -451,6 +451,26 @@ def test_buying_power_cap_uses_buying_power_when_daytrading_power_zero() -> None
     assert info["applied"] is False
 
 
+def test_notional_buying_power_cap_does_not_equal_split_remaining_cash() -> None:
+    class FakeClient:
+        def get_account(self) -> dict[str, str]:
+            return {"buying_power": "217.49", "daytrading_buying_power": "217.49"}
+
+    plan = PaperOrderPlan("AMD", "buy", qty=0.0, price=483.0, target_qty=0.12, notional_amount=55.5)
+
+    capped, info = cap_buy_to_current_buying_power(
+        FakeClient(),
+        plan,
+        remaining_buy_count=10,
+        order_buying_power_buffer=0.999,
+    )
+
+    assert capped is not None
+    assert capped.notional_amount == 55.5
+    assert info["remaining_buy_count"] == 10
+    assert info["applied"] is False
+
+
 def test_small_account_uses_fractional_notional_buys() -> None:
     close = pd.DataFrame(
         {"AMD": [190.0], "SOXL": [40.0]},
