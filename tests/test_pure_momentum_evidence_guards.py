@@ -408,6 +408,34 @@ def test_execution_drift_passes_filled_targets() -> None:
     assert report["buy_fill_ratio"] == 1.0
 
 
+def test_execution_drift_passes_notional_orders_by_fill_ratio() -> None:
+    orders = [
+        {
+            "symbol": "AMD",
+            "side": "buy",
+            "state": "filled",
+            "qty": 0,
+            "notional_estimate": 100.0,
+            "filled_qty": "0.20",
+            "filled_avg_price": "499.99",
+        }
+    ]
+    evidence = {
+        "execution_drift": {
+            "enabled": True,
+            "max_symbol_qty_drift": 1,
+            "max_open_orders_after_run": 0,
+            "min_notional_fill_ratio": 0.98,
+        }
+    }
+
+    report = execution_drift_report(orders, {"AMD": 0.18}, {"AMD": 0.20}, 0, evidence)
+
+    assert report["passed"] is True
+    assert report["mode"] == "notional_buy_fill"
+    assert report["notional_fill_passed"] is True
+
+
 def test_buying_power_cap_uses_buying_power_when_daytrading_power_zero() -> None:
     class FakeClient:
         def get_account(self) -> dict[str, str]:

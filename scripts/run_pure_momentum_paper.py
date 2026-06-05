@@ -1581,6 +1581,8 @@ def execution_drift_report(
     planned_buy_notional = sum(float(order.get("notional_estimate") or 0.0) for order in orders if order.get("side") == "buy")
     filled_buy_notional = 0.0
     rejected_orders = []
+    buy_orders = [order for order in orders if order.get("side") == "buy"]
+    notional_buy_mode = bool(buy_orders) and all(as_float(order.get("qty")) == 0.0 for order in buy_orders)
     for order in orders:
         state = str(order.get("state", "")).lower()
         if state.startswith("rejected") or state.startswith("skipped"):
@@ -1600,17 +1602,22 @@ def execution_drift_report(
 
     max_symbol_qty_drift = int(drift_cfg.get("max_symbol_qty_drift", 1))
     max_open_orders = int(drift_cfg.get("max_open_orders_after_run", 0))
+    min_notional_fill_ratio = float(drift_cfg.get("min_notional_fill_ratio", 0.98))
     fill_ratio = filled_buy_notional / planned_buy_notional if planned_buy_notional > 0.0 else None
-    passed = (
-        max_abs_drift <= max_symbol_qty_drift
-        and open_order_count <= max_open_orders
-        and not rejected_orders
+    qty_drift_passed = max_abs_drift <= max_symbol_qty_drift
+    notional_fill_passed = fill_ratio is not None and fill_ratio >= min_notional_fill_ratio
+    passed = open_order_count <= max_open_orders and not rejected_orders and (
+        qty_drift_passed or (notional_buy_mode and notional_fill_passed)
     )
     return {
         "enabled": True,
         "passed": passed,
+        "mode": "notional_buy_fill" if notional_buy_mode else "quantity_drift",
         "max_symbol_qty_drift_allowed": max_symbol_qty_drift,
         "max_abs_symbol_qty_drift": round(max_abs_drift, 6),
+        "qty_drift_passed": qty_drift_passed,
+        "min_notional_fill_ratio": min_notional_fill_ratio,
+        "notional_fill_passed": notional_fill_passed,
         "open_order_count_after_run": open_order_count,
         "planned_buy_notional": round(planned_buy_notional, 2),
         "filled_buy_notional": round(filled_buy_notional, 2),
