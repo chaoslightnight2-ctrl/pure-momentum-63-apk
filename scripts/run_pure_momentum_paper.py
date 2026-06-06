@@ -169,6 +169,18 @@ def forward_lock_report(strategy_cfg: dict[str, Any], evidence_cfg: dict[str, An
     if actual_caps != locked_caps:
         mismatches.append({"field": "symbol_weight_caps", "actual": actual_caps, "locked": locked_caps})
 
+    if "selection_breadth_symbols" in lock_cfg:
+        actual_breadth_symbols = normalize_symbol_list(strategy_cfg.get("selection_breadth_symbols"))
+        locked_breadth_symbols = normalize_symbol_list(lock_cfg.get("selection_breadth_symbols"))
+        if actual_breadth_symbols != locked_breadth_symbols:
+            mismatches.append(
+                {
+                    "field": "selection_breadth_symbols",
+                    "actual": actual_breadth_symbols,
+                    "locked": locked_breadth_symbols,
+                }
+            )
+
     actual_sleeves = {
         str(item.get("name")): round(float(item.get("allocation", 0.0)), 6)
         for item in (strategy_cfg.get("phase_sleeves") or [])
@@ -252,6 +264,19 @@ def normalize_partial_defense_guard_for_lock(guard_cfg: dict[str, Any]) -> dict[
         "hold_days": int(guard_cfg.get("hold_days", 0)),
         "cooldown_days": int(guard_cfg.get("cooldown_days", 0)),
     }
+
+
+def normalize_symbol_list(symbols: Any) -> list[str]:
+    return sorted({str(symbol).upper() for symbol in (symbols or [])})
+
+
+def selection_breadth_symbols(strategy_cfg: dict[str, Any], universe: list[str]) -> list[str]:
+    extra_symbols = normalize_symbol_list(strategy_cfg.get("selection_breadth_symbols"))
+    return sorted(set(str(symbol).upper() for symbol in universe) | set(extra_symbols))
+
+
+def is_daily_guard_due_reason(reason: str | None) -> bool:
+    return str(reason or "").startswith(("regime_defense_", "partial_defense_"))
 
 
 def anomaly_guard_report(
@@ -480,10 +505,13 @@ def select_strategy_symbols(close: pd.DataFrame, strategy_cfg: dict[str, Any], u
     spydd_min_mom5 = None if spydd_min_mom5_raw is None else float(spydd_min_mom5_raw)
     spy_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
 
-    if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns:
+    breadth_universe = [symbol for symbol in selection_breadth_symbols(strategy_cfg, universe) if symbol in close.columns]
+    if len(close) <= max(lookback_days, 63, breadth_lookback) or spy_symbol not in close.columns or not breadth_universe:
         return selection_result([], "insufficient_regime_data", None, None, None, strategy_cfg)
 
-    breadth20 = float(((close[universe].iloc[-1] / close[universe].iloc[-breadth_lookback - 1] - 1.0) > 0.0).mean())
+    breadth20 = float(
+        ((close[breadth_universe].iloc[-1] / close[breadth_universe].iloc[-breadth_lookback - 1] - 1.0) > 0.0).mean()
+    )
     spy = close[spy_symbol]
     spy20 = float(spy.iloc[-1] / spy.iloc[-breadth_lookback - 1] - 1.0)
     spy_dd63 = float(spy.iloc[-1] / spy.iloc[-63:].max() - 1.0)
@@ -1673,8 +1701,9 @@ def main() -> None:
     symbols = [str(symbol).upper() for symbol in strategy_cfg["universe"]]
     quantum_symbols = quantum_sleeve_symbols(strategy_cfg)
     defense_symbols = regime_defense_symbols(strategy_cfg)
+    breadth_symbols = selection_breadth_symbols(strategy_cfg, symbols)
     regime_symbol = str(strategy_cfg.get("regime_symbol", "SPY")).upper()
-    data_symbols = sorted(set(symbols + quantum_symbols + defense_symbols + [regime_symbol]))
+    data_symbols = sorted(set(symbols + quantum_symbols + defense_symbols + breadth_symbols + [regime_symbol]))
     universe = set(symbols + quantum_symbols + [symbol for symbol in defense_symbols if not symbol.startswith("^")])
     lookback_days = int(strategy_cfg.get("lookback_days", 63))
     rebalance_days = int(strategy_cfg.get("rebalance_days", 5))
@@ -1836,6 +1865,7 @@ def main() -> None:
         phase_status["aligned"]
         or (phase_sleeves_enabled and phase_status.get("phase_offset") in phase_sleeve_offsets)
         or phase_sleeve_missing_state
+        or is_daily_guard_due_reason(due_reason)
     )
     if due and phase_status["enabled"] and not phase_allowed and not args.ignore_phase_lock:
         report = {

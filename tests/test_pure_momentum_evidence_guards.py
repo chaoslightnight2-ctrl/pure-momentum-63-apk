@@ -19,10 +19,13 @@ from scripts.run_pure_momentum_paper import (
     forward_lock_report,
     apply_partial_defense_overlay,
     apply_quantum_sleeve_defense,
+    is_daily_guard_due_reason,
     managed_positions,
     partial_defense_report,
     regime_defense_report,
     regime_defense_symbols,
+    select_strategy_symbols,
+    selection_breadth_symbols,
     split_buy_plans_into_rounds,
     stateful_regime_signal,
 )
@@ -94,6 +97,78 @@ def test_forward_lock_blocks_changed_allocation() -> None:
 
     assert report["passed"] is False
     assert report["mismatches"][0]["field"] == "phase_sleeves"
+
+
+def test_forward_lock_checks_selection_breadth_symbols() -> None:
+    strategy = {
+        "name": "pure_momentum_cap_phase_blend_gross12_mid13",
+        "lookback_days": 63,
+        "top_n": 7,
+        "rebalance_days": 7,
+        "target_gross_leverage": 1.2,
+        "max_gross_leverage": 1.3,
+        "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+        "selection_breadth_symbols": ["AAPL", "MSFT"],
+        "phase_sleeves": [
+            {"name": "phase0_core", "allocation": 0.85},
+            {"name": "phase1_diversifier", "allocation": 0.15},
+        ],
+    }
+    evidence = {
+        "forward_lock": {
+            "enabled": True,
+            "strategy_name": "pure_momentum_cap_phase_blend_gross12_mid13",
+            "lookback_days": 63,
+            "top_n": 7,
+            "rebalance_days": 7,
+            "target_gross_leverage": 1.2,
+            "max_gross_leverage": 1.3,
+            "symbol_weight_caps": {"SOXL": 0.08, "TECL": 0.12},
+            "selection_breadth_symbols": ["AAPL", "GOOGL"],
+            "phase_sleeves": {"phase0_core": 0.85, "phase1_diversifier": 0.15},
+        }
+    }
+
+    report = forward_lock_report(strategy, evidence)
+
+    assert report["passed"] is False
+    assert any(item["field"] == "selection_breadth_symbols" for item in report["mismatches"])
+
+
+def test_selection_uses_extra_breadth_symbols_without_ranking_them() -> None:
+    idx = pd.date_range("2026-01-01", periods=80, freq="D")
+    close = pd.DataFrame(index=idx)
+    close["AAA"] = [100.0] * 60 + [95.0] * 20
+    close["BBB"] = [100.0] * 60 + [94.0] * 20
+    close["AAPL"] = [100.0] * 60 + [104.0] * 20
+    close["MSFT"] = [100.0] * 60 + [105.0] * 20
+    close["GOOGL"] = [100.0] * 60 + [106.0] * 20
+    close["SPY"] = [100.0] * 60 + [103.0] * 20
+    strategy = {
+        "lookback_days": 63,
+        "top_n": 2,
+        "regime_symbol": "SPY",
+        "breadth_lookback_days": 20,
+        "mid_breadth_cash_low": 0.50,
+        "mid_breadth_cash_high": 0.66,
+        "mid_breadth_sleeve_spy20_min": 0.025,
+        "mid_breadth_sleeve_top_n": 2,
+        "mid_breadth_sleeve_gross_leverage": 1.2,
+        "weak_breadth_threshold": 0.33,
+        "selection_breadth_symbols": ["AAPL", "MSFT", "GOOGL"],
+    }
+
+    selection = select_strategy_symbols(close, strategy, ["AAA", "BBB"])
+
+    assert round(selection.breadth20, 2) == 0.60
+    assert selection.mode == "normal_mid_breadth_spy20_top2_gross1.2"
+    assert set(selection.symbols).issubset({"AAA", "BBB"})
+
+
+def test_daily_guard_due_reasons_can_bypass_phase_lock() -> None:
+    assert is_daily_guard_due_reason("regime_defense_entry") is True
+    assert is_daily_guard_due_reason("partial_defense_exit") is True
+    assert is_daily_guard_due_reason("phase_sleeve_due") is False
 
 
 def test_forward_lock_checks_quantum_sleeve() -> None:
