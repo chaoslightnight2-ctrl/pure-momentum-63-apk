@@ -1,7 +1,7 @@
 {
-  "last_order_count": 30,
-  "last_rebalance_at_utc": "2026-06-15T18:54:45.196456+00:00",
-  "last_rebalance_date": "2026-06-12",
+  "last_order_count": 0,
+  "last_rebalance_at_utc": "2026-06-24T16:56:39.027606+00:00",
+  "last_rebalance_date": "2026-06-23",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "ARQQ",
@@ -14,17 +14,19 @@
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.44776119402985076,
-      "last_rebalance_date": "2026-06-11",
+      "breadth20": 0.373134328358209,
+      "last_rebalance_date": "2026-06-23",
       "selected_symbols": [
-        "HOOD"
+        "HOOD",
+        "MARA"
       ],
       "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
-      "spy20": -0.013913914461042065,
-      "spy_dd63": -0.02871361079069601,
+      "spy20": -0.013639444131039902,
+      "spy_dd63": -0.03172865595295571,
       "target_gross_override": null,
       "target_weights": {
-        "HOOD": 1.0
+        "HOOD": 0.5,
+        "MARA": 0.5
       }
     },
     "phase1_diversifier": {
