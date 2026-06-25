@@ -1,7 +1,7 @@
 {
-  "last_order_count": 0,
-  "last_rebalance_at_utc": "2026-06-24T16:56:39.027606+00:00",
-  "last_rebalance_date": "2026-06-23",
+  "last_order_count": 35,
+  "last_rebalance_at_utc": "2026-06-25T17:03:40.247347+00:00",
+  "last_rebalance_date": "2026-06-24",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "ARQQ",
@@ -10,7 +10,8 @@
     "MARA",
     "QBTS",
     "QUBT",
-    "RGTI"
+    "RGTI",
+    "RIOT"
   ],
   "phase_sleeves": {
     "phase0_core": {
@@ -30,19 +31,19 @@
       }
     },
     "phase1_diversifier": {
-      "breadth20": 0.4925373134328358,
-      "last_rebalance_date": "2026-06-12",
+      "breadth20": 0.44776119402985076,
+      "last_rebalance_date": "2026-06-24",
       "selected_symbols": [
         "HOOD",
-        "MARA"
+        "RIOT"
       ],
       "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
-      "spy20": 0.0034904245971760783,
-      "spy_dd63": -0.023460651621822648,
+      "spy20": -0.020598534151166747,
+      "spy_dd63": -0.032177466243158204,
       "target_gross_override": null,
       "target_weights": {
         "HOOD": 0.5,
-        "MARA": 0.5
+        "RIOT": 0.5
       }
     }
   },
