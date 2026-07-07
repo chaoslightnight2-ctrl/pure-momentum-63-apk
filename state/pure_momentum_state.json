@@ -1,12 +1,11 @@
 {
-  "last_order_count": 70,
-  "last_rebalance_at_utc": "2026-07-06T17:30:46.222757+00:00",
-  "last_rebalance_date": "2026-07-02",
+  "last_order_count": 60,
+  "last_rebalance_at_utc": "2026-07-07T17:02:17.174618+00:00",
+  "last_rebalance_date": "2026-07-06",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "AMD",
     "ARQQ",
-    "HOOD",
     "IONQ",
     "QBTS",
     "QUBT",
@@ -41,18 +40,24 @@
     },
     "phase1_diversifier": {
       "breadth20": 0.44776119402985076,
-      "last_rebalance_date": "2026-06-24",
+      "last_rebalance_date": "2026-07-06",
       "selected_symbols": [
-        "HOOD",
+        "SOXL",
+        "AMD",
+        "TECL",
+        "TQQQ",
         "RIOT"
       ],
-      "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
-      "spy20": -0.020598534151166747,
-      "spy_dd63": -0.032177466243158204,
+      "selection_mode": "loss_spy20_mild_neg_lb63_top5",
+      "spy20": -0.005117646378935969,
+      "spy_dd63": -0.008365949485922508,
       "target_gross_override": null,
       "target_weights": {
-        "HOOD": 0.5,
-        "RIOT": 0.5
+        "AMD": 0.26666666666666666,
+        "RIOT": 0.26666666666666666,
+        "SOXL": 0.08,
+        "TECL": 0.12,
+        "TQQQ": 0.26666666666666666
       }
     }
   },
