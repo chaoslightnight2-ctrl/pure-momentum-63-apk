@@ -1,7 +1,7 @@
 {
-  "last_order_count": 60,
-  "last_rebalance_at_utc": "2026-07-07T17:02:17.174618+00:00",
-  "last_rebalance_date": "2026-07-06",
+  "last_order_count": 0,
+  "last_rebalance_at_utc": "2026-07-15T16:09:21.346084+00:00",
+  "last_rebalance_date": "2026-07-14",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "AMD",
@@ -17,26 +17,14 @@
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.47761194029850745,
-      "last_rebalance_date": "2026-07-02",
-      "selected_symbols": [
-        "SOXL",
-        "AMD",
-        "TECL",
-        "RIOT",
-        "TQQQ"
-      ],
-      "selection_mode": "loss_spy20_mild_neg_lb63_top5",
-      "spy20": -0.009998447148781842,
-      "spy_dd63": -0.016945468542716724,
+      "breadth20": 0.5223880597014925,
+      "last_rebalance_date": "2026-07-14",
+      "selected_symbols": [],
+      "selection_mode": "normal_mid_breadth_cash",
+      "spy20": 0.01620074372995517,
+      "spy_dd63": -0.0076400062934948165,
       "target_gross_override": null,
-      "target_weights": {
-        "AMD": 0.26666666666666666,
-        "RIOT": 0.26666666666666666,
-        "SOXL": 0.08,
-        "TECL": 0.12,
-        "TQQQ": 0.26666666666666666
-      }
+      "target_weights": {}
     },
     "phase1_diversifier": {
       "breadth20": 0.44776119402985076,
