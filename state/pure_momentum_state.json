@@ -1,17 +1,13 @@
 {
-  "last_order_count": 55,
-  "last_rebalance_at_utc": "2026-07-27T16:51:35.286057+00:00",
-  "last_rebalance_date": "2026-07-23",
-  "last_rebalance_reason": "phase_sleeve_due",
+  "last_order_count": 48,
+  "last_rebalance_at_utc": "2026-07-30T16:16:41.052149+00:00",
+  "last_rebalance_date": "2026-07-29",
+  "last_rebalance_reason": "partial_defense_entry",
   "last_selected_symbols": [
     "AMD",
-    "ARQQ",
+    "BIL",
     "HOOD",
-    "IONQ",
     "NVDA",
-    "QBTS",
-    "QUBT",
-    "RGTI",
     "SPXL",
     "UPRO"
   ],
