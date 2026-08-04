@@ -1,32 +1,29 @@
 {
-  "last_order_count": 48,
-  "last_rebalance_at_utc": "2026-07-30T16:16:41.052149+00:00",
-  "last_rebalance_date": "2026-07-29",
-  "last_rebalance_reason": "partial_defense_entry",
+  "last_order_count": 50,
+  "last_rebalance_at_utc": "2026-08-04T16:32:59.773550+00:00",
+  "last_rebalance_date": "2026-08-03",
+  "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
-    "AMD",
-    "BIL",
+    "ARQQ",
     "HOOD",
+    "IONQ",
     "NVDA",
+    "QBTS",
+    "QUBT",
+    "RGTI",
     "SPXL",
     "UPRO"
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.5522388059701493,
-      "last_rebalance_date": "2026-07-23",
-      "selected_symbols": [
-        "NVDA",
-        "AMD"
-      ],
-      "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
-      "spy20": 0.0067372245202108605,
-      "spy_dd63": -0.025657028537518944,
+      "breadth20": 0.5223880597014925,
+      "last_rebalance_date": "2026-08-03",
+      "selected_symbols": [],
+      "selection_mode": "normal_mid_breadth_cash",
+      "spy20": 0.008505421898758136,
+      "spy_dd63": 0.0,
       "target_gross_override": null,
-      "target_weights": {
-        "AMD": 0.5,
-        "NVDA": 0.5
-      }
+      "target_weights": {}
     },
     "phase1_diversifier": {
       "breadth20": 0.47761194029850745,
