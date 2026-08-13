@@ -1,7 +1,7 @@
 {
   "last_order_count": 36,
-  "last_rebalance_at_utc": "2026-08-05T16:23:24.520843+00:00",
-  "last_rebalance_date": "2026-08-04",
+  "last_rebalance_at_utc": "2026-08-13T15:40:11.533077+00:00",
+  "last_rebalance_date": "2026-08-12",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "AMD",
@@ -15,12 +15,12 @@
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.5223880597014925,
-      "last_rebalance_date": "2026-08-03",
+      "breadth20": 0.6417910447761194,
+      "last_rebalance_date": "2026-08-12",
       "selected_symbols": [],
       "selection_mode": "normal_mid_breadth_cash",
-      "spy20": 0.008505421898758136,
-      "spy_dd63": 0.0,
+      "spy20": 0.023423103473677598,
+      "spy_dd63": -0.0009958093287190106,
       "target_gross_override": null,
       "target_weights": {}
     },
