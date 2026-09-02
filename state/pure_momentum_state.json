@@ -1,7 +1,7 @@
 {
-  "last_order_count": 45,
-  "last_rebalance_at_utc": "2026-08-25T15:29:19.644340+00:00",
-  "last_rebalance_date": "2026-08-24",
+  "last_order_count": 35,
+  "last_rebalance_at_utc": "2026-09-02T18:06:48.744444+00:00",
+  "last_rebalance_date": "2026-09-01",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "ARQQ",
@@ -11,26 +11,21 @@
     "PLTR",
     "QBTS",
     "QUBT",
-    "RGTI",
-    "SPXL"
+    "RGTI"
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.6119402985074627,
-      "last_rebalance_date": "2026-08-21",
+      "breadth20": 0.5074626865671642,
+      "last_rebalance_date": "2026-09-01",
       "selected_symbols": [
-        "HOOD",
-        "PLTR",
-        "SPXL"
+        "PLTR"
       ],
-      "selection_mode": "normal_mid_breadth_spy20_top3_gross1.2",
-      "spy20": 0.036255096278245524,
-      "spy_dd63": -0.015632275033884424,
-      "target_gross_override": 1.2,
+      "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
+      "spy20": -0.012381195573069936,
+      "spy_dd63": -0.02069724827078301,
+      "target_gross_override": null,
       "target_weights": {
-        "HOOD": 0.3333333333333333,
-        "PLTR": 0.3333333333333333,
-        "SPXL": 0.3333333333333333
+        "PLTR": 1.0
       }
     },
     "phase1_diversifier": {
