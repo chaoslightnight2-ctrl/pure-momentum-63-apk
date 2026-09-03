@@ -1,13 +1,15 @@
 {
-  "last_order_count": 35,
-  "last_rebalance_at_utc": "2026-09-02T18:06:48.744444+00:00",
-  "last_rebalance_date": "2026-09-01",
+  "last_order_count": 60,
+  "last_rebalance_at_utc": "2026-09-03T18:07:58.236236+00:00",
+  "last_rebalance_date": "2026-09-02",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "ARQQ",
+    "COIN",
     "CVNA",
     "HOOD",
     "IONQ",
+    "NVDA",
     "PLTR",
     "QBTS",
     "QUBT",
@@ -29,21 +31,25 @@
       }
     },
     "phase1_diversifier": {
-      "breadth20": 0.6716417910447762,
-      "last_rebalance_date": "2026-08-24",
+      "breadth20": 0.4925373134328358,
+      "last_rebalance_date": "2026-09-02",
       "selected_symbols": [
         "HOOD",
         "PLTR",
-        "CVNA"
+        "CVNA",
+        "COIN",
+        "NVDA"
       ],
-      "selection_mode": "normal_lb63_top7_mom5_pos_above20ma",
-      "spy20": 0.03298643326494766,
-      "spy_dd63": -0.018524752004466793,
+      "selection_mode": "loss_spy20_mild_neg_lb63_top5",
+      "spy20": -0.006014633880629727,
+      "spy_dd63": -0.01635217727469096,
       "target_gross_override": null,
       "target_weights": {
-        "CVNA": 0.3333333333333333,
-        "HOOD": 0.3333333333333333,
-        "PLTR": 0.3333333333333333
+        "COIN": 0.2,
+        "CVNA": 0.2,
+        "HOOD": 0.2,
+        "NVDA": 0.2,
+        "PLTR": 0.2
       }
     }
   },
