@@ -1,9 +1,10 @@
 {
   "last_order_count": 60,
-  "last_rebalance_at_utc": "2026-09-03T18:07:58.236236+00:00",
-  "last_rebalance_date": "2026-09-02",
+  "last_rebalance_at_utc": "2026-09-11T17:57:53.218025+00:00",
+  "last_rebalance_date": "2026-09-10",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
+    "AMD",
     "ARQQ",
     "COIN",
     "CVNA",
@@ -17,17 +18,17 @@
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.5074626865671642,
-      "last_rebalance_date": "2026-09-01",
+      "breadth20": 0.40298507462686567,
+      "last_rebalance_date": "2026-09-10",
       "selected_symbols": [
-        "PLTR"
+        "AMD"
       ],
       "selection_mode": "loss_spy_dd_2_5_accel20_minus63_top2",
-      "spy20": -0.012381195573069936,
-      "spy_dd63": -0.02069724827078301,
+      "spy20": -0.025775167978497215,
+      "spy_dd63": -0.025775167978497215,
       "target_gross_override": null,
       "target_weights": {
-        "PLTR": 1.0
+        "AMD": 1.0
       }
     },
     "phase1_diversifier": {
