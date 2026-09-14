@@ -1,7 +1,7 @@
 {
-  "last_order_count": 60,
-  "last_rebalance_at_utc": "2026-09-11T17:57:53.218025+00:00",
-  "last_rebalance_date": "2026-09-10",
+  "last_order_count": 0,
+  "last_rebalance_at_utc": "2026-09-14T19:37:00.936771+00:00",
+  "last_rebalance_date": "2026-09-11",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "AMD",
@@ -10,11 +10,11 @@
     "CVNA",
     "HOOD",
     "IONQ",
-    "NVDA",
     "PLTR",
     "QBTS",
     "QUBT",
-    "RGTI"
+    "RGTI",
+    "SMCI"
   ],
   "phase_sleeves": {
     "phase0_core": {
@@ -32,25 +32,25 @@
       }
     },
     "phase1_diversifier": {
-      "breadth20": 0.4925373134328358,
-      "last_rebalance_date": "2026-09-02",
+      "breadth20": 0.4626865671641791,
+      "last_rebalance_date": "2026-09-11",
       "selected_symbols": [
-        "HOOD",
+        "SMCI",
         "PLTR",
-        "CVNA",
+        "HOOD",
         "COIN",
-        "NVDA"
+        "CVNA"
       ],
       "selection_mode": "loss_spy20_mild_neg_lb63_top5",
-      "spy20": -0.006014633880629727,
-      "spy_dd63": -0.01635217727469096,
+      "spy20": -0.015521612194766221,
+      "spy_dd63": -0.01747059542623941,
       "target_gross_override": null,
       "target_weights": {
         "COIN": 0.2,
         "CVNA": 0.2,
         "HOOD": 0.2,
-        "NVDA": 0.2,
-        "PLTR": 0.2
+        "PLTR": 0.2,
+        "SMCI": 0.2
       }
     }
   },
