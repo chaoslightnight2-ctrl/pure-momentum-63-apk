@@ -1,9 +1,10 @@
 {
-  "last_order_count": 63,
-  "last_rebalance_at_utc": "2026-09-23T18:41:03.697671+00:00",
-  "last_rebalance_date": "2026-09-21",
+  "last_order_count": 79,
+  "last_rebalance_at_utc": "2026-10-01T19:53:06.836525+00:00",
+  "last_rebalance_date": "2026-09-30",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
+    "AMD",
     "ARQQ",
     "COIN",
     "CVNA",
@@ -14,29 +15,30 @@
     "QBTS",
     "QUBT",
     "RGTI",
-    "SMCI"
+    "SMCI",
+    "TECL"
   ],
   "phase_sleeves": {
     "phase0_core": {
-      "breadth20": 0.40298507462686567,
-      "last_rebalance_date": "2026-09-21",
+      "breadth20": 0.26865671641791045,
+      "last_rebalance_date": "2026-09-30",
       "selected_symbols": [
         "MSTR",
-        "PLTR",
-        "COIN",
         "SMCI",
-        "HOOD"
+        "PLTR",
+        "AMD",
+        "TECL"
       ],
-      "selection_mode": "normal_lb63_top7_mom5_pos_above20ma",
-      "spy20": 0.015653276679761685,
-      "spy_dd63": -0.003161512935710875,
+      "selection_mode": "loss_weak_breadth_comp_40_40_20_top5",
+      "spy20": -0.0008314855875831695,
+      "spy_dd63": -0.01717008370108053,
       "target_gross_override": null,
       "target_weights": {
-        "COIN": 0.2,
-        "HOOD": 0.2,
-        "MSTR": 0.2,
-        "PLTR": 0.2,
-        "SMCI": 0.2
+        "AMD": 0.22000000000000003,
+        "MSTR": 0.22000000000000003,
+        "PLTR": 0.22000000000000003,
+        "SMCI": 0.22000000000000003,
+        "TECL": 0.12
       }
     },
     "phase1_diversifier": {
