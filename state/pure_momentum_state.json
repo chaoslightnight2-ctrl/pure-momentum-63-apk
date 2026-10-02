@@ -1,14 +1,11 @@
 {
-  "last_order_count": 79,
-  "last_rebalance_at_utc": "2026-10-01T19:53:06.836525+00:00",
-  "last_rebalance_date": "2026-09-30",
+  "last_order_count": 55,
+  "last_rebalance_at_utc": "2026-10-02T19:34:17.624028+00:00",
+  "last_rebalance_date": "2026-10-01",
   "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "AMD",
     "ARQQ",
-    "COIN",
-    "CVNA",
-    "HOOD",
     "IONQ",
     "MSTR",
     "PLTR",
@@ -42,25 +39,25 @@
       }
     },
     "phase1_diversifier": {
-      "breadth20": 0.4626865671641791,
-      "last_rebalance_date": "2026-09-11",
+      "breadth20": 0.208955223880597,
+      "last_rebalance_date": "2026-10-01",
       "selected_symbols": [
+        "MSTR",
         "SMCI",
         "PLTR",
-        "HOOD",
-        "COIN",
-        "CVNA"
+        "AMD",
+        "TECL"
       ],
-      "selection_mode": "loss_spy20_mild_neg_lb63_top5",
-      "spy20": -0.015521612194766221,
-      "spy_dd63": -0.01747059542623941,
+      "selection_mode": "loss_weak_breadth_comp_40_40_20_top5",
+      "spy20": -0.009419495785098708,
+      "spy_dd63": -0.01541741952489284,
       "target_gross_override": null,
       "target_weights": {
-        "COIN": 0.2,
-        "CVNA": 0.2,
-        "HOOD": 0.2,
-        "PLTR": 0.2,
-        "SMCI": 0.2
+        "AMD": 0.22000000000000003,
+        "MSTR": 0.22000000000000003,
+        "PLTR": 0.22000000000000003,
+        "SMCI": 0.22000000000000003,
+        "TECL": 0.12
       }
     }
   },
