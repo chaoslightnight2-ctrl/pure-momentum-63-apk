@@ -1,8 +1,8 @@
 {
   "last_order_count": 10,
-  "last_rebalance_at_utc": "2026-10-20T18:46:21.552609+00:00",
-  "last_rebalance_date": "2026-10-19",
-  "last_rebalance_reason": "regime_defense_entry",
+  "last_rebalance_at_utc": "2026-10-21T18:57:59.717706+00:00",
+  "last_rebalance_date": "2026-10-20",
+  "last_rebalance_reason": "phase_sleeve_due",
   "last_selected_symbols": [
     "PFIX"
   ],
