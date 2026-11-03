@@ -1,18 +1,14 @@
 {
-  "last_order_count": 57,
-  "last_rebalance_at_utc": "2026-10-30T19:45:33.076803+00:00",
-  "last_rebalance_date": "2026-10-29",
-  "last_rebalance_reason": "phase_sleeve_due",
+  "last_order_count": 48,
+  "last_rebalance_at_utc": "2026-11-03T20:41:30.035527+00:00",
+  "last_rebalance_date": "2026-11-02",
+  "last_rebalance_reason": "partial_defense_entry",
   "last_selected_symbols": [
     "AMD",
-    "ARQQ",
+    "BIL",
     "CVNA",
-    "IONQ",
     "MSTR",
     "PLTR",
-    "QBTS",
-    "QUBT",
-    "RGTI",
     "SMCI",
     "TECL",
     "TSLA"
